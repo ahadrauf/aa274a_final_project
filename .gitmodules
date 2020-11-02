@@ -1,0 +1,3 @@
+[submodule "src/asl_turtlebot"]
+	path = src/asl_turtlebot
+	url = git@github.com:StanfordASL/asl_turtlebot.git
