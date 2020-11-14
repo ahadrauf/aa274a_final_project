@@ -10,3 +10,6 @@
 [submodule "src/turtlebot3"]
 	path = src/turtlebot3
 	url = https://github.com/ROBOTIS-GIT/turtlebot3
+[submodule "src/rrt_exploration"]
+	path = src/rrt_exploration
+	url = git@github.com:hasauino/rrt_exploration.git
