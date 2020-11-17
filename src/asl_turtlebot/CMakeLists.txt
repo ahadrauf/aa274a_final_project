@@ -53,6 +53,7 @@ add_message_files(
  DetectedObject.msg
  DetectedObjectList.msg
  ImagePose.msg
+ AggregateStatistics.msg
 )
 
 ## Generate services in the 'srv' folder
