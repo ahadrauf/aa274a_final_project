@@ -1,3 +1,5 @@
+src/asl_turtlebot/tfmodels/ssd_resnet_50_fpn_coco.pb
+
 devel/
 logs/
 build/
