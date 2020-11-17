@@ -27,9 +27,9 @@
 
   <!-- load the controllers -->
   <!--<node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false"
-    output="screen" ns="/gripper" args="right_gripper_controller left_gripper_controller joint_state_controller"/>
+    output="screen" ns="/gripper" args="right_gripper_controller left_gripper_controller joint_state_controller"/>-->
 
-  <node pkg="asl_turtlebot" type="gripper_sim_controller.py" name="gripper_sim_controller" />-->
+  <!--<node pkg="asl_turtlebot" type="gripper_sim_controller.py" name="gripper_sim_controller" />-->
 
   <!-- convert joint states to TF transforms for rviz, etc -->
   <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
@@ -75,6 +75,8 @@
   <node pkg="asl_turtlebot" type="goal_commander.py" name="goal_commander" />
   <node pkg="asl_turtlebot" type="detector_mobilenet.py" name="turtlebot_detector" />
   <node pkg="asl_turtlebot" type="add_robot_pose_to_image.py" name="adding_robot_pose_to_image" />
+  
+  <node pkg="asl_turtlebot" type="navigator.py" name="turtlebot_navigator" output="screen" />
 
   <node name="rviz" pkg="rviz" type="rviz" args="-d $(find asl_turtlebot)/rviz/project_sim.rviz"/>
 </launch>

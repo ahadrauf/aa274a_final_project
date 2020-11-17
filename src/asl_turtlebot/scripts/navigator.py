@@ -107,7 +107,7 @@ class Navigator:
         rospy.Subscriber('/map_metadata', MapMetaData, self.map_md_callback)
         rospy.Subscriber('/cmd_nav', Pose2D, self.cmd_nav_callback)
 
-        print "finished init"
+        print("finished init")
         
     def dyn_cfg_callback(self, config, level):
         rospy.loginfo("Reconfigure Request: k1:{k1}, k2:{k2}, k3:{k3}".format(**config))
@@ -120,6 +120,7 @@ class Navigator:
         """
         loads in goal if different from current goal, and replans
         """
+        rospy.loginfo("Received new cmd_nav callback with goal ({}, {}, {})".format(data.x, data.y, data.theta))
         if data.x != self.x_g or data.y != self.y_g or data.theta != self.theta_g:
             self.x_g = data.x
             self.y_g = data.y
@@ -340,7 +341,7 @@ class Navigator:
                 self.current_plan = []
                 rospy.loginfo("Navigator: waiting for state info")
                 self.switch_mode(Mode.IDLE)
-                print e
+                print(e)
                 pass
 
             # STATE MACHINE LOGIC
