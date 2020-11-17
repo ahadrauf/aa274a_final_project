@@ -8,8 +8,10 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
+  geometry_msgs
+  sensor_msgs
   message_generation
-	dynamic_reconfigure
+  dynamic_reconfigure
 )
 
 ## System dependencies are found with CMake's conventions
@@ -50,6 +52,7 @@ add_message_files(
  FILES
  DetectedObject.msg
  DetectedObjectList.msg
+ ImagePose.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -70,6 +73,8 @@ add_message_files(
 generate_messages(
  DEPENDENCIES
  std_msgs
+ geometry_msgs
+ sensor_msgs
 )
 
 ################################################
@@ -188,4 +193,3 @@ include_directories(
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
-

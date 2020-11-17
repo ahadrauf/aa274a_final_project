@@ -792,13 +792,13 @@
 
 
     
-    <model name='BoxAprilTag'>
+    <model name='Stop Sign'>
       <link name='link'>
         <collision name='collision'>
           <geometry>
             <mesh>
-              <uri>model://box_april_tag/meshes/mesh.dae</uri>
-              <scale>1 1 1</scale>
+              <uri>model://stop_sign/meshes/stop_sign.dae</uri>
+              <scale>.2 .2 .2</scale>
             </mesh>
           </geometry>
           <max_contacts>10</max_contacts>
@@ -821,15 +821,15 @@
         <visual name='visual'>
           <geometry>
             <mesh>
-              <uri>model://box_april_tag/meshes/mesh.dae</uri>
+              <uri>model://stop_sign/meshes/stop_sign.dae</uri>
               <scale>.2 .2 .2</scale>
             </mesh>
           </geometry>
           <material>
             <script>
-              <!-- <uri>model://box_april_tag/materials/scripts</uri> -->
-              <uri>model://box_april_tag/materials/textures</uri>
-              <name>BoxAprilTag/Diffuse</name>
+              <uri>model://stop_sign/materials/scripts</uri>
+              <uri>model://stop_sign/materials/textures</uri>
+              <name>StopSign/Diffuse</name>
             </script>
           </material>
         </visual>

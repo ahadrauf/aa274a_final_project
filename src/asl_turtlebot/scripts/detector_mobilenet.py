@@ -7,10 +7,12 @@ from tf import TransformListener
 import tensorflow as tf
 import numpy as np
 from sensor_msgs.msg import CompressedImage, Image, CameraInfo, LaserScan
-from asl_turtlebot.msg import DetectedObject, DetectedObjectList
+from asl_turtlebot.msg import DetectedObject, DetectedObjectList, ImagePose
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import math
+
+from std_msgs.msg import String
 
 # path to the trained conv net
 PATH_TO_MODEL = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../tfmodels/ssd_mobilenet_v1_coco.pb')
@@ -20,7 +22,7 @@ PATH_TO_LABELS = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../t
 # False will use a very simple color thresholding to detect stop signs only
 USE_TF = True
 # minimum score for positive detection
-MIN_SCORE = .5
+MIN_SCORE = .7
 
 def load_object_labels(filename):
     """ loads the coco object readable name """
@@ -42,13 +44,13 @@ class Detector:
         rospy.init_node('turtlebot_detector', anonymous=True)
         self.bridge = CvBridge()
 
-        self.detected_objects_pub = rospy.Publisher('/detector/objects', DetectedObjectList, queue_size=10)
+        self.detected_objects_pub = rospy.Publisher('/detector/objects', DetectedObjectList, queue_size=50)
 
         if USE_TF:
             self.detection_graph = tf.Graph()
             with self.detection_graph.as_default():
-                od_graph_def = tf.GraphDef()
-                with tf.gfile.GFile(PATH_TO_MODEL, 'rb') as fid:
+                od_graph_def = tf.compat.v1.GraphDef() # tf.GraphDef()
+                with tf.compat.v1.gfile.GFile(PATH_TO_MODEL, 'rb') as fid:
                     serialized_graph = fid.read()
                     od_graph_def.ParseFromString(serialized_graph)
                     tf.import_graph_def(od_graph_def,name='')
@@ -57,9 +59,10 @@ class Detector:
                 self.d_scores = self.detection_graph.get_tensor_by_name('detection_scores:0')
                 self.d_classes = self.detection_graph.get_tensor_by_name('detection_classes:0')
                 self.num_d = self.detection_graph.get_tensor_by_name('num_detections:0')
-                config = tf.ConfigProto()
+
+                config = tf.compat.v1.ConfigProto()
                 config.gpu_options.allow_growth = True
-            self.sess = tf.Session(graph=self.detection_graph, config=config)
+            self.sess = tf.compat.v1.Session(graph=self.detection_graph, config=config)
             # self.sess = tf.Session(graph=self.detection_graph)
 
         # camera and laser parameters that get updated
@@ -74,9 +77,12 @@ class Detector:
         self.object_labels = load_object_labels(PATH_TO_LABELS)
 
         self.tf_listener = TransformListener()
-        rospy.Subscriber('/raspicam_node/image_raw', Image, self.camera_callback, queue_size=1, buff_size=2**24)
-        rospy.Subscriber('/raspicam_node/image/compressed', CompressedImage, self.compressed_camera_callback, queue_size=1, buff_size=2**24)
-        rospy.Subscriber('/raspicam_node/camera_info', CameraInfo, self.camera_info_callback)
+        # rospy.Subscriber('/raspicam_node/image_raw', Image, self.camera_callback, queue_size=1, buff_size=2**24)
+        # rospy.Subscriber('/raspicam_node/image/compressed', CompressedImage, self.compressed_camera_callback, queue_size=1, buff_size=2**24)
+        # rospy.Subscriber('/raspicam_node/camera_info', CameraInfo, self.camera_info_callback)
+        # rospy.Subscriber('/scan', LaserScan, self.laser_callback)
+        rospy.Subscriber('/camera/image_raw_with_pose', ImagePose, self.camera_callback, queue_size=1)
+        rospy.Subscriber('/camera/camera_info', CameraInfo, self.camera_info_callback)
         rospy.Subscriber('/scan', LaserScan, self.laser_callback)
 
     def run_detection(self, img):
@@ -93,7 +99,6 @@ class Detector:
                 (boxes, scores, classes, num) = self.sess.run(
                 [self.d_boxes,self.d_scores,self.d_classes,self.num_d],
                 feed_dict={self.image_tensor: image_np_expanded})
-
             return self.filter(boxes[0], scores[0], classes[0], num[0])
 
         else:
@@ -123,7 +128,7 @@ class Detector:
         f_scores, f_boxes, f_classes = [], [], []
         f_num = 0
 
-        for i in range(num):
+        for i in range(int(num)):
             if scores[i] >= MIN_SCORE:
                 f_scores.append(scores[i])
                 f_boxes.append(boxes[i])
@@ -184,12 +189,12 @@ class Detector:
         img_laser_ranges = list(self.laser_ranges)
 
         try:
-            img = self.bridge.imgmsg_to_cv2(msg, "passthrough")
-            img_bgr8 = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            img = self.bridge.imgmsg_to_cv2(msg.image, "passthrough")
+            img_bgr8 = self.bridge.imgmsg_to_cv2(msg.image, "bgr8")
         except CvBridgeError as e:
             print(e)
 
-        self.camera_common(img_laser_ranges, img, img_bgr8)
+        self.camera_common(img_laser_ranges, img, img_bgr8, msg.robot_pose)
 
     def compressed_camera_callback(self, msg):
         """ callback for camera images """
@@ -205,7 +210,7 @@ class Detector:
 
         self.camera_common(img_laser_ranges, img, img_bgr8)
 
-    def camera_common(self, img_laser_ranges, img, img_bgr8):
+    def camera_common(self, img_laser_ranges, img, img_bgr8, robot_pose):
         (img_h,img_w,img_c) = img.shape
 
         # runs object detection in the image
@@ -241,7 +246,7 @@ class Detector:
                 # estimate the corresponding distance using the lidar
                 dist = self.estimate_distance(thetaleft,thetaright,img_laser_ranges)
 
-                if not self.object_publishers.has_key(cl):
+                if cl not in self.object_publishers:
                     self.object_publishers[cl] = rospy.Publisher('/detector/'+self.object_labels[cl],
                         DetectedObject, queue_size=10)
 
@@ -260,11 +265,12 @@ class Detector:
                 detected_objects.objects.append(self.object_labels[cl])
                 detected_objects.ob_msgs.append(object_msg)
 
+            detected_objects.robot_pose = robot_pose
             self.detected_objects_pub.publish(detected_objects)
 
         # displays the camera image
-        #cv2.imshow("Camera", img_bgr8)
-        #cv2.waitKey(1)
+        cv2.imshow("Camera", img_bgr8)
+        cv2.waitKey(1)
 
     def camera_info_callback(self, msg):
         """ extracts relevant camera intrinsic parameters from the camera_info message.
