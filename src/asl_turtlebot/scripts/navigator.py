@@ -56,7 +56,7 @@ class Navigator:
         self.occupancy_updated = False
 
         # plan parameters
-        self.plan_resolution =  0.1
+        self.plan_resolution =  0.05
         self.plan_horizon = 15
 
         # time when we started following the plan
@@ -65,10 +65,10 @@ class Navigator:
         self.plan_start = [0.,0.]
         
         # Robot limits
-        self.v_max = 0.2    # maximum velocity
-        self.om_max = 0.4   # maximum angular velocity
+        self.v_max = 0.2 * 6    # maximum velocity
+        self.om_max = 0.4 * 3   # maximum angular velocity
 
-        self.v_des = 0.12   # desired cruising velocity
+        self.v_des = 0.12 * 6   # desired cruising velocity
         self.theta_start_thresh = 0.05   # threshold in theta to start moving forward when path-following
         self.start_pos_thresh = 0.2     # threshold to be far enough into the plan to recompute it
 
@@ -78,7 +78,7 @@ class Navigator:
         self.at_thresh_theta = 0.05
 
         # trajectory smoothing
-        self.spline_alpha = 0.15
+        self.spline_alpha = 0.1
         self.traj_dt = 0.1
 
         # trajectory tracking controller parameters
@@ -105,9 +105,9 @@ class Navigator:
 
         rospy.Subscriber('/map', OccupancyGrid, self.map_callback)
         rospy.Subscriber('/map_metadata', MapMetaData, self.map_md_callback)
-        rospy.Subscriber('/cmd_nav', Pose2D, self.cmd_nav_callback)
+        rospy.Subscriber('/cmd_nav_exec', Pose2D, self.cmd_nav_callback)
 
-        print("finished init")
+        print "finished init"
         
     def dyn_cfg_callback(self, config, level):
         rospy.loginfo("Reconfigure Request: k1:{k1}, k2:{k2}, k3:{k3}".format(**config))
@@ -120,11 +120,11 @@ class Navigator:
         """
         loads in goal if different from current goal, and replans
         """
-        rospy.loginfo("Received new cmd_nav callback with goal ({}, {}, {})".format(data.x, data.y, data.theta))
         if data.x != self.x_g or data.y != self.y_g or data.theta != self.theta_g:
             self.x_g = data.x
             self.y_g = data.y
             self.theta_g = data.theta
+            self.current_plan_duration = np.inf # force replan
             self.replan()
 
     def map_md_callback(self, msg):
@@ -176,7 +176,7 @@ class Navigator:
         returns whether the robot has reached the goal position with enough
         accuracy to return to idle state
         """
-        return (linalg.norm(np.array([self.x-self.x_g, self.y-self.y_g])) < self.at_thresh and abs(wrapToPi(self.theta - self.theta_g)) < self.at_thresh_theta)
+        return (linalg.norm(np.array([self.x-self.x_g, self.y-self.y_g])) < self.near_thresh and abs(wrapToPi(self.theta - self.theta_g)) < self.at_thresh_theta)
 
     def aligned(self):
         """
@@ -273,7 +273,7 @@ class Navigator:
         problem = AStar(state_min,state_max,x_init,x_goal,self.occupancy,self.plan_resolution)
 
         rospy.loginfo("Navigator: computing navigation plan")
-        success =  problem.solve()
+        success = problem.solve()
         if not success:
             rospy.loginfo("Planning failed")
             return
@@ -341,7 +341,7 @@ class Navigator:
                 self.current_plan = []
                 rospy.loginfo("Navigator: waiting for state info")
                 self.switch_mode(Mode.IDLE)
-                print(e)
+                print e
                 pass
 
             # STATE MACHINE LOGIC
@@ -363,7 +363,9 @@ class Navigator:
                     self.replan() # we aren't near the goal but we thought we should have been, so replan
             elif self.mode == Mode.PARK:
                 if self.at_goal():
-                    # forget about goal:
+                    # Update "completed" param
+                    rospy.set_param('/nav/status', 'completed')
+                    # forget about goal
                     self.x_g = None
                     self.y_g = None
                     self.theta_g = None
