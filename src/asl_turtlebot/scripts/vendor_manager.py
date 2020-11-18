@@ -139,15 +139,15 @@ class VendorManager:
         vendor_y = self.y + data.distance * np.sin(self.theta + theta_avg)
 
         # calculate moving average of the vendor position and save the updated position in self.vendor_pos
-        if data.id in self.vendor_pos_buffer:
-            buffer = self.vendor_pos_buffer[data.id]
+        if data.name in self.vendor_pos_buffer:
+            buffer = self.vendor_pos_buffer[data.name]
             if len(buffer) == AVERAGING_SIZE:
                 buffer.popleft()
             buffer.append((vendor_x, vendor_y))
         else:
-            self.vendor_pos_buffer[data.id] = deque((vendor_x, vendor_y))
+            self.vendor_pos_buffer[data.name] = deque((vendor_x, vendor_y))
 
-        self.vendor_pos[data.id] = self.vendor_pos_buffer[data.id] / len(self.vendor_pos_buffer[data.id])
+        self.vendor_pos[data.name] = self.vendor_pos_buffer[data.name] / len(self.vendor_pos_buffer[data.name])
 
 
     def delivery_request_callback(self, data):
