@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-# from utils import plot_line_segments
+from utils import plot_line_segments
+
 
 class AStar(object):
     """Represents a motion planning problem to be solved using A*"""
@@ -9,7 +10,7 @@ class AStar(object):
     def __init__(self, statespace_lo, statespace_hi, x_init, x_goal, occupancy, resolution=1):
         self.statespace_lo = statespace_lo         # state space lower bound (e.g., [-5, -5])
         self.statespace_hi = statespace_hi         # state space upper bound (e.g., [5, 5])
-        self.occupancy = occupancy                 # occupancy grid (a DetOccupancyGrid2D object)
+        self.occupancy = occupancy                 # occupancy grid
         self.resolution = resolution               # resolution of the discretization of state space (cell/m)
         self.x_init = self.snap_to_grid(x_init)    # initial state
         self.x_goal = self.snap_to_grid(x_goal)    # goal state
@@ -21,9 +22,9 @@ class AStar(object):
         self.cost_to_arrive = {}    # dictionary of the cost-to-arrive at state from start (often called g score)
         self.came_from = {}         # dictionary keeping track of each state's parent to reconstruct the path
 
-        self.open_set.add(self.x_init)
-        self.cost_to_arrive[self.x_init] = 0
-        self.est_cost_through[self.x_init] = self.distance(self.x_init,self.x_goal)
+        self.open_set.add(x_init)
+        self.cost_to_arrive[x_init] = 0
+        self.est_cost_through[x_init] = self.distance(x_init,x_goal)
 
         self.path = None        # the final path as a list of states
 
@@ -35,12 +36,14 @@ class AStar(object):
             x: state tuple
         Output:
             Boolean True/False
-        Hint: self.occupancy is a DetOccupancyGrid2D object, take a look at its methods for what might be
-              useful here
+        Hint: look at the usage for the DetOccupancyGrid2D.is_free() method
         """
         ########## Code starts here ##########
-        within_bounds = np.all([a <= xi <= b for (a, xi, b) in zip(self.statespace_lo, x, self.statespace_hi)])
-        return within_bounds and self.occupancy.is_free(x)
+        # Check to make sure the point is within the bounds of the map
+        for idx, val in enumerate(x):
+            if val < self.statespace_lo[idx] or val > self.statespace_hi[idx]:
+                return False
+        return self.occupancy.is_free(x)
         ########## Code ends here ##########
 
     def distance(self, x1, x2):
@@ -88,13 +91,13 @@ class AStar(object):
         """
         neighbors = []
         ########## Code starts here ##########
-        for x_multiple in [-1, 0, 1]:
-            for y_multiple in [-1, 0, 1]:
-                if x_multiple == y_multiple == 0:
-                    continue
-                grid_pt = self.snap_to_grid((x[0] + x_multiple*self.resolution, x[1] + y_multiple*self.resolution))
-                if self.occupancy.is_free(grid_pt):
-                    neighbors.append(grid_pt)
+        # Start at angle = 0 and go counter clockwise (right hand rule)
+        dxs = np.array([1, 1, 0, -1, -1, -1, 0, 1]) * self.resolution
+        dys = np.array([0, 1, 1, 1, 0, -1, -1, -1]) * self.resolution
+        for dx, dy in zip(dxs, dys):
+            neighbor = (self.snap_to_grid(x + np.array([dx, dy])))
+            if self.is_free(neighbor):
+                neighbors.append(neighbor)
         ########## Code ends here ##########
         return neighbors
 
@@ -115,11 +118,9 @@ class AStar(object):
         path = [self.x_goal]
         current = path[-1]
         while current != self.x_init:
-            path.insert(0, self.came_from[current])
-            # path.append(self.came_from[current])
+            path.append(self.came_from[current])
             current = path[-1]
-        return path
-        # return list(reversed(path))
+        return list(reversed(path))
 
     def plot_path(self, fig_num=0):
         """Plots the path found in self.path and the obstacles"""
@@ -138,8 +139,8 @@ class AStar(object):
         plt.axis([0, self.occupancy.width, 0, self.occupancy.height])
 
     def plot_tree(self, point_size=15):
-        # plot_line_segments([(x, self.came_from[x]) for x in self.open_set if x != self.x_init], linewidth=1, color="blue", alpha=0.2)
-        # plot_line_segments([(x, self.came_from[x]) for x in self.closed_set if x != self.x_init], linewidth=1, color="blue", alpha=0.2)
+        plot_line_segments([(x, self.came_from[x]) for x in self.open_set if x != self.x_init], linewidth=1, color="blue", alpha=0.2)
+        plot_line_segments([(x, self.came_from[x]) for x in self.closed_set if x != self.x_init], linewidth=1, color="blue", alpha=0.2)
         px = [x[0] for x in self.open_set | self.closed_set if x != self.x_init and x != self.x_goal]
         py = [x[1] for x in self.open_set | self.closed_set if x != self.x_init and x != self.x_goal]
         plt.scatter(px, py, color="blue", s=point_size, zorder=10, alpha=0.2)
@@ -160,30 +161,43 @@ class AStar(object):
                 set membership efficiently using the syntax "if item in set".
         """
         ########## Code starts here ##########
-        import rospy
+        # Add initial state to open set and add corresponding cost scores
+        self.open_set.add(self.x_init)
+        self.cost_to_arrive[self.x_init] = 0
+        self.est_cost_through[self.x_init] = self.distance(self.x_init, self.x_goal)
 
-        while self.open_set:
-            rospy.loginfo("Current set size: {}".format(len(self.open_set)))
-            x_current = self.find_best_est_cost_through()
-            if x_current == self.x_goal:
+        # Main algo loop - continue as long as our open set is not null
+        while len(self.open_set) > 0:
+            print("astar length: ", len(self.open_set))
+            # We will process our "most promising" state in our open set, i.e.: greedily selecting the one with the
+            # lowest estimated cost-through
+            x = self.find_best_est_cost_through()
+            # Check if this is the goal state; if it is, break the loop
+            if x == self.x_goal:
                 self.path = self.reconstruct_path()
                 return True
-            self.open_set.remove(x_current)
-            self.closed_set.add(x_current)
-            
-            for x_neigh in self.get_neighbors(x_current):
-                if x_neigh in self.closed_set:
+            # Remove this current state from the open set and add it to the closed set
+            self.open_set.remove(x)
+            self.closed_set.add(x)
+            # Get the free neighbors
+            neighbors = self.get_neighbors(x)
+            for neighbor in neighbors:
+                # Check if it is already been included in our graph (as part of the closed set), continue if so
+                if neighbor in self.closed_set:
                     continue
-                tentative_cost_to_arrive = self.cost_to_arrive[x_current] + self.distance(x_current, x_neigh)
-                if x_neigh not in self.open_set:
-                    self.open_set.add(x_neigh)
-                elif tentative_cost_to_arrive > self.cost_to_arrive[x_neigh]:
+                # Calculate tentative cost to arrive and add this value to the open set if it does not exist already
+                tentative_cta = self.cost_to_arrive[x] + self.distance(neighbor, x)
+                if neighbor not in self.open_set:
+                    self.open_set.add(neighbor)
+                    self.cost_to_arrive[neighbor] = np.inf
+                # If the cost to arrive to this node isn't better than its current cost, we continue
+                if tentative_cta > self.cost_to_arrive[neighbor]:
                     continue
-                
-                self.came_from[x_neigh] = x_current
-                self.cost_to_arrive[x_neigh] = tentative_cost_to_arrive
-                self.est_cost_through[x_neigh] = tentative_cost_to_arrive + self.distance(x_neigh, self.x_goal)
-                
+                # Update costs and predecessor
+                self.came_from[neighbor] = x
+                self.cost_to_arrive[neighbor] = tentative_cta
+                self.est_cost_through[neighbor] = tentative_cta + self.distance(neighbor, self.x_goal)
+        # If we still haven't found the goal state, this method fails ):
         return False
         ########## Code ends here ##########
 
