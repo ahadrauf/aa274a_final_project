@@ -39,12 +39,14 @@ import smach
 from smach import Sequence
 import smach_ros
 
+from collections import deque
 from geometry_msgs.msg import Twist, Pose2D, PoseStamped
 from std_msgs.msg import String
-from asl_turtlebot.msg import DetectedObject, VendorList
+from asl_turtlebot.msg import DetectedObject
 
 # TASK PARAMS
 TOTAL_VENDORS = 4           # TODO: This needs to be updated once we have a final list
+AVERAGING_SIZE = 3
 
 # TOPICS
 WAYPOINT_CMD_TOPIC = '/cmd_nav'
@@ -73,13 +75,19 @@ class VendorManager:
         rospy.init_node("vendor_manager")
         rospy.loginfo("Initializing...")
 
+        # current state of the robot
+        self.x = 0.0
+        self.y = 0.0
+        self.theta = 0.0
+
         # Initialize relevant attributes
         self.vendor_pos = {}                # Will be added to as we encounter vendors. Should be (x,y) value per vendor
+        self.vendor_pos_buffer = {}         # Used to calculate the moving average of a vendor pos
         self.delivery_list = None           # Will be added when receive vendor list
 
         # Subscribers
         rospy.Subscriber(WAYPOINT_CMD_TOPIC, Pose2D, self.cmd_nav_callback)
-        rospy.Subscriber(DELIVERY_REQUEST_TOPIC, VendorList)
+        rospy.Subscriber(DELIVERY_REQUEST_TOPIC, String, self.delivery_request_callback)
         rospy.Subscriber(VENDOR_DETECTED_TOPIC, DetectedObject, self.vendor_detected_callback)
 
         # Publishers
@@ -111,6 +119,8 @@ class VendorManager:
         """
         # We only pass this received command to the navigator if we're in the explore state
         rospy.loginfo("current state: {}".format(self.sm.get_active_states()[0]))
+        self.x, self.y, self.theta = data.x, data.y, data.theta
+
         if self.sm.get_active_states()[0] == 'EXPLORE':
             goal = [data.x, data.y, data.theta]
             self.navigate_to_goal(goal, wait_until_completed=False)
@@ -122,18 +132,33 @@ class VendorManager:
         Args:
             data (DetectedObject): Received message data
         """
-        # TODO: Convert the raw detected vendor information into (x, y) global cartesian values
-        # TODO: Store this (x,y) cartesian pair in a vendor-keyword entry in self.vendor_pos
-        pass
+        # Use the detected vendor information and the current state of the robot to calculate the position (x,y)
+        # of the vendor in the world frame.
+        theta_avg = (data.thetaleft + data.thetaright) / 2.0
+        vendor_x = self.x + data.distance * np.cos(self.theta + theta_avg)
+        vendor_y = self.y + data.distance * np.sin(self.theta + theta_avg)
+
+        # calculate moving average of the vendor position and save the updated position in self.vendor_pos
+        if data.id in self.vendor_pos_buffer:
+            buffer = self.vendor_pos_buffer[data.id]
+            if len(buffer) == AVERAGING_SIZE:
+                buffer.popleft()
+            buffer.append((vendor_x, vendor_y))
+        else:
+            self.vendor_pos_buffer[data.id] = deque((vendor_x, vendor_y))
+
+        self.vendor_pos[data.id] = self.vendor_pos_buffer[data.id] / len(self.vendor_pos_buffer[data.id])
+
 
     def delivery_request_callback(self, data):
         """
         Processes the received delivery request
 
         Args:
-            data (VendorList): Received message data
+            data (String): Received message data
         """
-        self.delivery_list = list(data.vendors)
+
+        self.delivery_list = data.split(",")
 
     def shutdown_callback(self):
         """
