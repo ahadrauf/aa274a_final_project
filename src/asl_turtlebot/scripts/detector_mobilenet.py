@@ -286,8 +286,9 @@ class Detector:
             self.detected_objects_pub.publish(detected_objects)
 
         # displays the camera image
-        cv2.imshow("Camera", img_bgr8)
-        cv2.waitKey(1)
+        if max(np.shape(img_bgr8)) > 50:  # Filter out the false camera images at the beginning
+            cv2.imshow("Camera", img_bgr8)
+            cv2.waitKey(1)
 
     def camera_info_callback(self, msg):
         """ extracts relevant camera intrinsic parameters from the camera_info message.
