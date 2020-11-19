@@ -2,9 +2,9 @@
 #### Purple Tier Pavonebot (Ahad Rauf, Xiangbing Ji, Josiah Wong, Maggie Ford)
 
 ### Launch files
-```roslaunch asl_turtlebot project_sim.launch``` - for baseline, includes manual waypoint navigation (I think - TBD @Josiah)
-```roslaunch asl_turtlebot autonomous_navigation.launch``` - for RRT exploration, saves the map every 10 samples (~every 10 seconds) to a file (map.txt by default)
-```roslaunch asl_turtlebot delivery.launch``` - for automated delivery management, broadcasts the map from map.txt every second to a new topic /map_nav
+ - ```roslaunch asl_turtlebot project_sim.launch``` - for baseline, includes manual waypoint navigation (I think - TBD @Josiah)
+ - ```roslaunch asl_turtlebot autonomous_navigation.launch``` - for RRT exploration, saves the map every 10 samples (~every 10 seconds) to a file (map.txt by default)
+ - ```roslaunch asl_turtlebot delivery.launch``` - for automated delivery management, broadcasts the map from map.txt every second to a new topic /map_nav
 
 ### Extra Scripts Written for Baseline Management
  - ```scripts/add_robot_pose_to_image.py``` - Because detector_mobilenet.py takes a while to finish parsing the latest camera image for vendor signs, a fast-moving car could see a significant error in its XY-position if its pose was sampled after image recognition. This file adds the robot's ```geometry_msgs/Pose2D``` pose to the ```camera/raw_image``` topic that gets sent to detector_mobilenet.py as a cohesive unit, improving positional accuracy by up to 0.5m in testing.
