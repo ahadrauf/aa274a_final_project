@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+# This node can aggregate the (mean, standard deviation, max, min, number_of_samples) statistics for any floating point topics
+# You can use it for nice statistics for the final presentationFloat32
+# Input the <name> of your topics into the list "topics" below, and the node will output the final statistics to a new topic "<name>_pub"
+# All input topics must have type Float32
 
 import rospy
 import os
@@ -27,6 +31,7 @@ def callback(data, name, pub_list, value_list):
 def listener():
     rospy.init_node('aggregate_statistics', anonymous=True)
 
+    # The listener will list to all topics in this list, and publish it to listener_topic_name + "_pub"
     topics = ['/robot/distance_after_detection']
     pub_list = {topic: rospy.Publisher(topic + "_pub", AggregateStatistics, queue_size=10) for topic in topics}
     value_list = {topic: AggregateStatistics(topic, 0, 0., 0., -1e3, 1e3) for topic in topics}

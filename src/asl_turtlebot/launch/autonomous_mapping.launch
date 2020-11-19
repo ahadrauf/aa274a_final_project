@@ -1,11 +1,16 @@
+<!--  Launch file for signle robot on Gazebo -->
 <launch>
   <include file="$(find asl_turtlebot)/launch/create_project_world.launch" />
-
-  <node pkg="asl_turtlebot" type="goal_commander.py" name="goal_commander" />
+  
+  <include file="$(find rrt_exploration_tutorials)/launch/includes/move_baseSafe.launch">
+     <arg name="namespace" value=""/>
+  </include>
+  
   <node pkg="asl_turtlebot" type="detector_mobilenet.py" name="turtlebot_detector" />
   <node pkg="asl_turtlebot" type="add_robot_pose_to_image.py" name="adding_robot_pose_to_image" />
   <node pkg="asl_turtlebot" type="aggregate_statistics.py" name="aggregate_statistics" output="screen" />
   <node pkg="asl_turtlebot" type="save_map.py" name="save_map" output="screen" />
-  
-  <node pkg="asl_turtlebot" type="navigator.py" name="turtlebot_navigator" output="screen" />
+</node>
+
 </launch>
+
