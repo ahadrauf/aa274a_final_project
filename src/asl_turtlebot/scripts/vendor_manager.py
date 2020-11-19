@@ -28,9 +28,6 @@ Note that this should be the single entry point for all relevant sensory / comma
     RELEVANT PARAMS:
     /nav/status (String): status of the current navigation command being executed, one of {'completed', 'active', 'failed'}
     /nav/home (2-list): [x, y] home location for turtlebot
-
-TODO (Xiangbing?):
-    A) Convert DetectedObject info into global (x,y) coordinates for a given vendor
 """
 
 import roslib
@@ -39,19 +36,21 @@ import smach
 from smach import Sequence
 import smach_ros
 
+import numpy as np
+
 from collections import deque
 from geometry_msgs.msg import Twist, Pose2D, PoseStamped
 from std_msgs.msg import String
-from asl_turtlebot.msg import DetectedObject
+from asl_turtlebot.msg import DetectedObjectList, DetectedObject
 
 # TASK PARAMS
-TOTAL_VENDORS = 4           # TODO: This needs to be updated once we have a final list
+TOTAL_VENDORS = 5
 AVERAGING_SIZE = 3
 
 # TOPICS
 WAYPOINT_CMD_TOPIC = '/cmd_nav'
 DELIVERY_REQUEST_TOPIC = '/delivery_request'
-VENDOR_DETECTED_TOPIC = '/detector'
+VENDOR_DETECTED_TOPIC = '/detector/objects'
 CMD_NAV_EXEC_TOPIC = '/cmd_nav_exec'
 
 # PARAMS
@@ -68,6 +67,58 @@ STATE_OUTCOMES = {
     "SM":       ['completed'],
 }
 
+
+class RingBuffer(object):
+    """
+    Simple RingBuffer object to hold values to average (useful for, e.g.: filtering D component in PID control)
+
+    Note that the buffer object is a 2D numpy array, where each row corresponds to
+    individual entries into the buffer
+
+    Args:
+        dim (int): Size of entries being added. This is, e.g.: the size of a state vector that is to be stored
+        length (int): Size of the ring buffer
+    """
+
+    def __init__(self, dim, length):
+        # Store input args
+        self.dim = dim
+        self.length = length
+
+        # Save pointer to current place in the buffer
+        self.ptr = 0
+
+        # Construct ring buffer
+        self.buf = np.zeros((length, dim))
+
+    def push(self, value):
+        """
+        Pushes a new value into the buffer
+
+        Args:
+            value (int or float or array): Value(s) to push into the array (taken as a single new element)
+        """
+        # Add value, then increment pointer
+        self.buf[self.ptr] = np.array(value)
+        self.ptr = (self.ptr + 1) % self.length
+
+    def clear(self):
+        """
+        Clears buffer and reset pointer
+        """
+        self.buf = np.zeros((self.length, self.dim))
+        self.ptr = 0
+
+    @property
+    def average(self):
+        """
+        Gets the average of components in buffer
+
+        Returns:
+            float or np.array: Averaged value of all elements in buffer
+        """
+        return np.mean(self.buf, axis=0)
+
 # Define vendor manager class
 class VendorManager:
     def __init__(self):
@@ -75,20 +126,14 @@ class VendorManager:
         rospy.init_node("vendor_manager")
         rospy.loginfo("Initializing...")
 
-        # current state of the robot
-        self.x = 0.0
-        self.y = 0.0
-        self.theta = 0.0
-
         # Initialize relevant attributes
-        self.vendor_pos = {}                # Will be added to as we encounter vendors. Should be (x,y) value per vendor
         self.vendor_pos_buffer = {}         # Used to calculate the moving average of a vendor pos
         self.delivery_list = None           # Will be added when receive vendor list
 
         # Subscribers
         rospy.Subscriber(WAYPOINT_CMD_TOPIC, Pose2D, self.cmd_nav_callback)
         rospy.Subscriber(DELIVERY_REQUEST_TOPIC, String, self.delivery_request_callback)
-        rospy.Subscriber(VENDOR_DETECTED_TOPIC, DetectedObject, self.vendor_detected_callback)
+        rospy.Subscriber(VENDOR_DETECTED_TOPIC, DetectedObjectList, self.vendor_detected_callback)
 
         # Publishers
         self.cmd_exec_pub = rospy.Publisher(CMD_NAV_EXEC_TOPIC, Pose2D, queue_size=10)
@@ -118,9 +163,6 @@ class VendorManager:
             data (Pose2D): Received message data
         """
         # We only pass this received command to the navigator if we're in the explore state
-        rospy.loginfo("current state: {}".format(self.sm.get_active_states()[0]))
-        self.x, self.y, self.theta = data.x, data.y, data.theta
-
         if self.sm.get_active_states()[0] == 'EXPLORE':
             goal = [data.x, data.y, data.theta]
             self.navigate_to_goal(goal, wait_until_completed=False)
@@ -130,25 +172,31 @@ class VendorManager:
         Processes the newly received vendor information and stores it internally
 
         Args:
-            data (DetectedObject): Received message data
+            data (DetectedObjectList): Received message data
         """
-        # Use the detected vendor information and the current state of the robot to calculate the position (x,y)
-        # of the vendor in the world frame.
-        theta_avg = (data.thetaleft + data.thetaright) / 2.0
-        vendor_x = self.x + data.distance * np.cos(self.theta + theta_avg)
-        vendor_y = self.y + data.distance * np.sin(self.theta + theta_avg)
+        # Get robot x, y, theta
+        x, y, th = data.robot_pose.x, data.robot_pose.y, data.robot_pose.theta
+        #rospy.loginfo("Robot pos: ({}, {}, {})".format(x, y, th))
+        # Loop through all detected objects (each of type DetectedObjectList)
+        for obj_msg in data.ob_msgs:
+            # Use the detected vendor information and the current state of the robot to calculate the position (x,y)
+            # of the vendor in the world frame.
+            # d_theta = wrap_to_0_to_2pi(thetaright + wrap_to_0_to_2pi(thetaright - thetaleft) / 2)
+            d_theta = (obj_msg.thetaright + ((obj_msg.thetaleft - obj_msg.thetaright) % (2 * np.pi)) * 0.5) % (2 * np.pi)
+            vendor_x = x + obj_msg.distance * np.cos(th + d_theta)
+            vendor_y = y + obj_msg.distance * np.sin(th + d_theta)
+            #rospy.loginfo("Vendor d: {}, th_avg: {}".format(obj_msg.distance, d_theta))
 
-        # calculate moving average of the vendor position and save the updated position in self.vendor_pos
-        if data.name in self.vendor_pos_buffer:
-            buffer = self.vendor_pos_buffer[data.name]
-            if len(buffer) == AVERAGING_SIZE:
-                buffer.popleft()
-            buffer.append((vendor_x, vendor_y))
-        else:
-            self.vendor_pos_buffer[data.name] = deque((vendor_x, vendor_y))
+            # Add RingBuffer if new object is being detected
+            if obj_msg.name not in self.vendor_pos_buffer:
+                self.vendor_pos_buffer[obj_msg.name] = RingBuffer(dim=2, length=5)
 
-        self.vendor_pos[data.name] = self.vendor_pos_buffer[data.name] / len(self.vendor_pos_buffer[data.name])
+            # Push newest value received
+            if obj_msg.name in self.vendor_pos_buffer:
+                self.vendor_pos_buffer[obj_msg.name].push(np.array((vendor_x, vendor_y)))
 
+            # Debug
+            #rospy.loginfo("{} pos: {}".format(obj_msg.name, self.vendor_pos_buffer[obj_msg.name].average))
 
     def delivery_request_callback(self, data):
         """
@@ -158,13 +206,17 @@ class VendorManager:
             data (String): Received message data
         """
 
-        self.delivery_list = data.split(",")
+        self.delivery_list = data.data.split(",")
 
     def shutdown_callback(self):
         """
         Execute any final commands before shutting down
         """
         pass
+
+    @property
+    def vendor_pos(self):
+        return {name: buf.average for name, buf in self.vendor_pos_buffer.items()}
 
     class Explore(smach.State):
         """
@@ -176,8 +228,10 @@ class VendorManager:
 
         def execute(self, userdata):
             rospy.loginfo("Executing state EXPLORE")
-            while self.outer.delivery_list is None or len(self.outer.vendor_pos.keys()) != TOTAL_VENDORS:
+            while self.outer.delivery_list is None:# or len(self.outer.vendor_pos.keys()) != TOTAL_VENDORS:
                 rospy.sleep(1)
+
+            return "completed"
 
     class Pickup(smach.State):
         """
@@ -198,6 +252,8 @@ class VendorManager:
                 # Now, "receive" the order for 3 seconds
                 rospy.sleep(3)
 
+            return "completed"
+
     class Return(smach.State):
         """
         Return state. Returns to home location
@@ -213,6 +269,8 @@ class VendorManager:
             # Travel to home
             self.outer.navigate_to_goal(home_goal)
 
+            return "completed"
+
     class Idle(smach.State):
         """
         Idle state. Does nothing, this should be when we have completed our delivery task!
@@ -227,6 +285,8 @@ class VendorManager:
             # Loop endlessly
             while True:
                 continue
+
+            return "completed"
 
     def navigate_to_goal(self, goal, wait_until_completed=True):
         """
