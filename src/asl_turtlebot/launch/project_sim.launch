@@ -11,5 +11,4 @@
 
   <node pkg="asl_turtlebot" type="vendor_manager.py" name="vendor_manager_node" output="screen" />
 
-  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find asl_turtlebot)/rviz/project_sim.rviz"/>
 </launch>
