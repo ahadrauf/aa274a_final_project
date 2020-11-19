@@ -3,7 +3,8 @@
 import rospy
 import os
 # watch out on the order for the next two imports lol
-from tf import TransformListener
+# from tf import TransformListener, tfBuffer
+import tf2_ros
 import tensorflow as tf
 import numpy as np
 from sensor_msgs.msg import CompressedImage, Image, CameraInfo, LaserScan
@@ -12,17 +13,17 @@ from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import math
 
-from std_msgs.msg import String
+from std_msgs.msg import String, Float32
 
 # path to the trained conv net
-PATH_TO_MODEL = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../tfmodels/ssd_resnet_50_fpn_coco.pb')
+PATH_TO_MODEL = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../tfmodels/ssd_mobilenet_v1_coco.pb')
 PATH_TO_LABELS = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../tfmodels/coco_labels.txt')
 
 # set to True to use tensorflow and a conv net
 # False will use a very simple color thresholding to detect stop signs only
 USE_TF = True
 # minimum score for positive detection
-MIN_SCORE = .7
+MIN_SCORE = .55
 
 def load_object_labels(filename):
     """ loads the coco object readable name """
@@ -76,14 +77,19 @@ class Detector:
         self.object_publishers = {}
         self.object_labels = load_object_labels(PATH_TO_LABELS)
 
-        self.tf_listener = TransformListener()
+        # self.tf_listener = TransformListener()
         # rospy.Subscriber('/raspicam_node/image_raw', Image, self.camera_callback, queue_size=1, buff_size=2**24)
         # rospy.Subscriber('/raspicam_node/image/compressed', CompressedImage, self.compressed_camera_callback, queue_size=1, buff_size=2**24)
         # rospy.Subscriber('/raspicam_node/camera_info', CameraInfo, self.camera_info_callback)
         # rospy.Subscriber('/scan', LaserScan, self.laser_callback)
-        rospy.Subscriber('/camera/image_raw_with_pose', ImagePose, self.camera_callback, queue_size=1)
+        rospy.Subscriber('/camera/image_raw_with_pose', ImagePose, self.camera_callback, queue_size=5)
         rospy.Subscriber('/camera/camera_info', CameraInfo, self.camera_info_callback)
         rospy.Subscriber('/scan', LaserScan, self.laser_callback)
+
+
+        self.tfBuffer = tf2_ros.Buffer()
+        self.listener = tf2_ros.TransformListener(self.tfBuffer)
+        self.stat_pub = rospy.Publisher('/robot/distance_after_detection', Float32, queue_size=10)
 
     def run_detection(self, img):
         """ runs a detection method in a given image """
@@ -213,6 +219,17 @@ class Detector:
     def camera_common(self, img_laser_ranges, img, img_bgr8, robot_pose):
         (img_h,img_w,img_c) = img.shape
 
+        trans = None
+        while trans is None:
+            try:
+                trans = self.tfBuffer.lookup_transform('map', 'base_camera', rospy.Time(), rospy.Duration(1.0))  # TransformStamped
+            except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+                rospy.loginfo("ERROR: tfBuffer couldn't detect transformation between /map and /base_camera in add_robot_pose_to_image.py")
+                continue
+
+        diff = np.linalg.norm([trans.transform.translation.x, trans.transform.translation.y]) - np.linalg.norm([robot_pose.x, robot_pose.y])
+        self.stat_pub.publish(np.linalg.norm(diff))
+
         # runs object detection in the image
         (boxes, scores, classes, num) = self.run_detection(img)
 
@@ -269,8 +286,9 @@ class Detector:
             self.detected_objects_pub.publish(detected_objects)
 
         # displays the camera image
-        cv2.imshow("Camera", img_bgr8)
-        cv2.waitKey(1)
+        if max(np.shape(img_bgr8)) > 150:  # Filter out the false camera images at the beginning
+            cv2.imshow("Camera", img_bgr8)
+            cv2.waitKey(1)
 
     def camera_info_callback(self, msg):
         """ extracts relevant camera intrinsic parameters from the camera_info message.
