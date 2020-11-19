@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from utils import plot_line_segments
+# from utils import plot_line_segments
 
 
 class AStar(object):

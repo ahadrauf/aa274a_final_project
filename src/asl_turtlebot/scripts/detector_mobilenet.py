@@ -16,14 +16,14 @@ import math
 from std_msgs.msg import String, Float32
 
 # path to the trained conv net
-PATH_TO_MODEL = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../tfmodels/ssd_resnet_50_fpn_coco.pb')
+PATH_TO_MODEL = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../tfmodels/ssd_mobilenet_v1_coco.pb')
 PATH_TO_LABELS = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../tfmodels/coco_labels.txt')
 
 # set to True to use tensorflow and a conv net
 # False will use a very simple color thresholding to detect stop signs only
 USE_TF = True
 # minimum score for positive detection
-MIN_SCORE = .7
+MIN_SCORE = .55
 
 def load_object_labels(filename):
     """ loads the coco object readable name """
@@ -82,7 +82,7 @@ class Detector:
         # rospy.Subscriber('/raspicam_node/image/compressed', CompressedImage, self.compressed_camera_callback, queue_size=1, buff_size=2**24)
         # rospy.Subscriber('/raspicam_node/camera_info', CameraInfo, self.camera_info_callback)
         # rospy.Subscriber('/scan', LaserScan, self.laser_callback)
-        rospy.Subscriber('/camera/image_raw_with_pose', ImagePose, self.camera_callback, queue_size=1)
+        rospy.Subscriber('/camera/image_raw_with_pose', ImagePose, self.camera_callback, queue_size=5)
         rospy.Subscriber('/camera/camera_info', CameraInfo, self.camera_info_callback)
         rospy.Subscriber('/scan', LaserScan, self.laser_callback)
 
@@ -286,7 +286,7 @@ class Detector:
             self.detected_objects_pub.publish(detected_objects)
 
         # displays the camera image
-        if max(np.shape(img_bgr8)) > 50:  # Filter out the false camera images at the beginning
+        if max(np.shape(img_bgr8)) > 150:  # Filter out the false camera images at the beginning
             cv2.imshow("Camera", img_bgr8)
             cv2.waitKey(1)
 

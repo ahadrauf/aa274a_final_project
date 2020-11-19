@@ -21,57 +21,59 @@
     <arg name="name" value="box_apple"/>
     <arg name="x" default="3.32" />
     <arg name="y" default="2.93" />
-    <arg name="z" default="0.0" />
+    <arg name="z" default="0.4" />
     <arg name="roll" default="1.57079632679"/>
     <arg name="pitch" default="0"/>
     <arg name="yaw" default="0.0" />
   </include>
 
   <include file="$(find asl_turtlebot)/launch/spawn_box.launch">
-    <arg name="name" value="box_car"/>
+    <arg name="name" value="box_orange"/>
     <arg name="x" default="2.7" />
     <arg name="y" default="2.35" />
-    <arg name="z" default="0.0" />
+    <arg name="z" default="0.4" />
     <arg name="roll" default="1.57079632679"/>
     <arg name="pitch" default="0"/>
     <arg name="yaw" default="0.785398163" />
   </include>
 
   <include file="$(find asl_turtlebot)/launch/spawn_box.launch">
-    <arg name="name" value="box_cloud"/>
+    <arg name="name" value="box_cake"/>
     <arg name="x" default="2.715" />
     <arg name="y" default="0.87" />
-    <arg name="z" default="0.0" />
+    <arg name="z" default="0.4" />
     <arg name="roll" default="1.57079632679"/>
     <arg name="pitch" default="0"/>
     <arg name="yaw" default="1.57079632679" />
   </include>
 
   <include file="$(find asl_turtlebot)/launch/spawn_box.launch">
-    <arg name="name" value="box_toilet"/>
+    <arg name="name" value="box_pizza"/>
     <arg name="x" default="0.015" />
     <arg name="y" default="0.38" />
-    <arg name="z" default="0.0" />
+    <arg name="z" default="0.4" />
     <arg name="roll" default="1.57079632679"/>
     <arg name="pitch" default="0"/>
-    <arg name="yaw" default="-0.785398163" />
+    <arg name="yaw" default="1.57079632679" />
   </include>
 
+  <!--
   <include file="$(find asl_turtlebot)/launch/spawn_box.launch">
-    <arg name="name" value="box_carrot"/>
+    <arg name="name" value="box_apple1"/>
     <arg name="x" default="0.11" />
     <arg name="y" default="2.5" />
-    <arg name="z" default="0.0" />
+    <arg name="z" default="0.4" />
     <arg name="roll" default="1.57079632679"/>
     <arg name="pitch" default="0"/>
-    <arg name="yaw" default="0.785398163" />
+    <arg name="yaw" default="1.57079632679" />
   </include>
+  -->
 
   <include file="$(find asl_turtlebot)/launch/spawn_box.launch">
-    <arg name="name" value="box_house"/>
+    <arg name="name" value="box_doughnut"/>
     <arg name="x" default="2.0" />
     <arg name="y" default="2.0" />
-    <arg name="z" default="0.0" />
+    <arg name="z" default="0.4" />
     <arg name="roll" default="1.57079632679"/>
     <arg name="pitch" default="0"/>
     <arg name="yaw" default="0.785398163" />
