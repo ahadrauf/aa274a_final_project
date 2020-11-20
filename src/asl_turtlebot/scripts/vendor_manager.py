@@ -57,6 +57,15 @@ CMD_NAV_EXEC_TOPIC = '/cmd_nav_exec'
 NAV_STATUS_PARAM = '/nav/status'
 HOME_POS_PARAM = '/nav/home'
 
+# EXTENSIONS
+# Flag to turn on/off the extension to consider vendors with duplicate names. E.g two apple vendors.
+DUPLICATE_VENDOR_NAMES_EXIST = False
+# For any two detections, how close they are for us to consider they are detections of the same vendor.
+SAME_VENDOR_THRESHOLD = 0.1
+# The number of detections we need to confirm a vendor actually exists. Otherwise we consider these detections as
+# outliers and discard the detected vendor.
+NON_OUTLIER_SIZE = 3
+
 # Define all state outcomes
 STATE_OUTCOMES = {
     "EXPLORE":  ['completed'],
@@ -84,6 +93,7 @@ class RingBuffer(object):
         # Store input args
         self.dim = dim
         self.length = length
+        self.size = 0 # how many elements in this buffer now.
 
         # Save pointer to current place in the buffer
         self.ptr = 0
@@ -101,6 +111,7 @@ class RingBuffer(object):
         # Add value, then increment pointer
         self.buf[self.ptr] = np.array(value)
         self.ptr = (self.ptr + 1) % self.length
+        self.size = self.size + 1 if self.size < self.length else self.length
 
     def clear(self):
         """
@@ -178,25 +189,59 @@ class VendorManager:
         x, y, th = data.robot_pose.x, data.robot_pose.y, data.robot_pose.theta
         #rospy.loginfo("Robot pos: ({}, {}, {})".format(x, y, th))
         # Loop through all detected objects (each of type DetectedObjectList)
-        for obj_msg in data.ob_msgs:
-            # Use the detected vendor information and the current state of the robot to calculate the position (x,y)
-            # of the vendor in the world frame.
-            # d_theta = wrap_to_0_to_2pi(thetaright + wrap_to_0_to_2pi(thetaright - thetaleft) / 2)
-            d_theta = (obj_msg.thetaright + ((obj_msg.thetaleft - obj_msg.thetaright) % (2 * np.pi)) * 0.5) % (2 * np.pi)
-            vendor_x = x + obj_msg.distance * np.cos(th + d_theta)
-            vendor_y = y + obj_msg.distance * np.sin(th + d_theta)
-            #rospy.loginfo("Vendor d: {}, th_avg: {}".format(obj_msg.distance, d_theta))
+        if not DUPLICATE_VENDOR_NAMES_EXIST:
+            for obj_msg in data.ob_msgs:
+                # Use the detected vendor information and the current state of the robot to calculate the position (x,y)
+                # of the vendor in the world frame.
+                # d_theta = wrap_to_0_to_2pi(thetaright + wrap_to_0_to_2pi(thetaright - thetaleft) / 2)
+                d_theta = (obj_msg.thetaright + ((obj_msg.thetaleft - obj_msg.thetaright) % (2 * np.pi)) * 0.5) % (2 * np.pi)
+                vendor_x = x + obj_msg.distance * np.cos(th + d_theta)
+                vendor_y = y + obj_msg.distance * np.sin(th + d_theta)
+                #rospy.loginfo("Vendor d: {}, th_avg: {}".format(obj_msg.distance, d_theta))
 
-            # Add RingBuffer if new object is being detected
-            if obj_msg.name not in self.vendor_pos_buffer:
-                self.vendor_pos_buffer[obj_msg.name] = RingBuffer(dim=2, length=5)
+                # Add RingBuffer if new vendor is being detected
+                if obj_msg.name not in self.vendor_pos_buffer:
+                    self.vendor_pos_buffer[obj_msg.name] = RingBuffer(dim=2, length=5)
 
-            # Push newest value received
-            if obj_msg.name in self.vendor_pos_buffer:
                 self.vendor_pos_buffer[obj_msg.name].push(np.array((vendor_x, vendor_y)))
 
-            # Debug
-            #rospy.loginfo("{} pos: {}".format(obj_msg.name, self.vendor_pos_buffer[obj_msg.name].average))
+        if DUPLICATE_VENDOR_NAMES_EXIST:
+            for obj_msg in data.ob_msgs:
+                # Use the detected vendor information and the current state of the robot to calculate the position (x,y)
+                # of the vendor in the world frame.
+                # d_theta = wrap_to_0_to_2pi(thetaright + wrap_to_0_to_2pi(thetaright - thetaleft) / 2)
+                d_theta = (obj_msg.thetaright + ((obj_msg.thetaleft - obj_msg.thetaright) % (2 * np.pi)) * 0.5) % (
+                            2 * np.pi)
+                vendor_x = x + obj_msg.distance * np.cos(th + d_theta)
+                vendor_y = y + obj_msg.distance * np.sin(th + d_theta)
+                detected_vendor_pos = np.array((vendor_x, vendor_y))
+                # rospy.loginfo("Vendor d: {}, th_avg: {}".format(obj_msg.distance, d_theta))
+
+                # Add RingBuffer if new vendor is being detected
+                if obj_msg.name not in self.vendor_pos_buffer:
+                    self.vendor_pos_buffer[obj_msg.name] = [RingBuffer(dim=2, length=5)]
+                    self.vendor_pos_buffer[obj_msg.name][0].push(detected_vendor_pos)
+
+                # If there is already an vendor with the same name detected. Then there are two possibility:
+                # 1) the new detection belongs to one of the existing vendors, if the new detection is within the
+                # threshold radius of one of the existing vendor's position.
+                # 2) the new detection doesn't belong to any of the existing vendors.
+                #
+                # Note self.vendor_pos[obj_msg.name] is a list of RingBuffer now. Each entry in this list represents a
+                # RingBuffer of a unique vendor although all vendors in this list share the same vendor name.
+                if obj_msg.name in self.vendor_pos_buffer:
+                    existing_vendor = False
+                    for idx, existing_vendor_pos in enumerate(self.vendor_pos[obj_msg.name]):
+                        if np.linalg.norm(detected_vendor_pos - existing_vendor_pos) < SAME_VENDOR_THRESHOLD:
+                            self.vendor_pos_buffer[obj_msg.name][idx].push(detected_vendor_pos)
+                            existing_vendor = True
+                            break
+                    if not existing_vendor:
+                        self.vendor_pos_buffer[obj_msg.name].append(RingBuffer(dim=2, length=5))
+                        self.vendor_pos_buffer[obj_msg.name][-1].push(detected_vendor_pos)
+
+        # Debug
+         #rospy.loginfo("{} pos: {}".format(obj_msg.name, self.vendor_pos_buffer[obj_msg.name].average))
 
     def delivery_request_callback(self, data):
         """
@@ -216,7 +261,31 @@ class VendorManager:
 
     @property
     def vendor_pos(self):
-        return {name: buf.average for name, buf in self.vendor_pos_buffer.items()}
+        if not DUPLICATE_VENDOR_NAMES_EXIST:
+            return {name: buf.average for name, buf in self.vendor_pos_buffer.items()}
+
+        if DUPLICATE_VENDOR_NAMES_EXIST:
+            vendor_pos = {}
+            for name, buf_list in self.vendor_pos_buffer.items():
+                vendor_pos[name] = [buf.average for buf in buf_list]
+            return vendor_pos
+
+    @property
+    def final_vendor_pos(self):
+        if not DUPLICATE_VENDOR_NAMES_EXIST:
+            return self.vendor_pos
+
+        if DUPLICATE_VENDOR_NAMES_EXIST:
+            final_vendor_pos = {}
+            for name, buf_list in self.vendor_pos_buffer.items():
+                final_buf_list = []
+                for buf in buf_list:
+                    # If a vendor receives less than "NON_OUTLIER_SIZE" number of detections, consider this vendor as an
+                    # outlier and remove it from the final_vendor_pos.
+                    if buf.size >= NON_OUTLIER_SIZE:
+                        final_buf_list.append(buf)
+                final_vendor_pos[name] = [buf.average for buf in final_buf_list]
+            return final_vendor_pos
 
     class Explore(smach.State):
         """
@@ -247,8 +316,24 @@ class VendorManager:
             vendors = self.outer.plan_delivery(self.outer.delivery_list)
             # Execute pickup at each vendor location sequentially
             for vendor in vendors:
+                if vendor not in self.outer.final_vendor_pos:
+                    raise Exception("sorry, the requested vendor is not found!")
+
                 # Travel to this location
-                self.outer.navigate_to_goal([self.outer.vendor_pos[vendor][0], self.outer.vendor_pos[vendor][1], 0])    # TODO: What to use for th value?
+                if not DUPLICATE_VENDOR_NAMES_EXIST:
+                    self.outer.navigate_to_goal(
+                        [self.outer.vendor_pos[vendor][0], self.outer.vendor_pos[vendor][1], 0])    # TODO: What to use for th value?
+
+                if DUPLICATE_VENDOR_NAMES_EXIST:
+                    if not self.outer.final_vendor_pos[vendor]:
+                        raise Exception("sorry, the requested vendor is not found!")
+                    # Always navigate to the first vendor if there are duplicates. For example, if the user requests
+                    # pick up apple and we have 3 apple vendors "Apple1", "Apple2" and "Apple3". We always go to
+                    # "Apple1" to pick up the apple. This is incorrect, ideally we should implement a shortest path
+                    # planner to decide which apple vendor we will navigate to pick up.
+                    self.outer.navigate_to_goal(
+                        [self.outer.final_vendor_pos[vendor][0][0], self.outer.vendor_pos[vendor][0][1], 0])
+
                 # Now, "receive" the order for 3 seconds
                 rospy.sleep(3)
 
