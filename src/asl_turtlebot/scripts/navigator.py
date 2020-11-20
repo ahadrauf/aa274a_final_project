@@ -65,10 +65,10 @@ class Navigator:
         self.plan_start = [0.,0.]
         
         # Robot limits
-        self.v_max = 0.2 * 3    # maximum velocity
-        self.om_max = 0.4 * 2   # maximum angular velocity
+        self.v_max = 0.2    # maximum velocity
+        self.om_max = 0.4   # maximum angular velocity
 
-        self.v_des = 0.12 * 2   # desired cruising velocity
+        self.v_des = 0.12    # desired cruising velocity
         self.theta_start_thresh = 0.05   # threshold in theta to start moving forward when path-following
         self.start_pos_thresh = 0.2     # threshold to be far enough into the plan to recompute it
 
@@ -107,7 +107,9 @@ class Navigator:
         rospy.Subscriber('/map_metadata', MapMetaData, self.map_md_callback)
         rospy.Subscriber('/cmd_nav_exec', Pose2D, self.cmd_nav_callback)
 
-        print "finished init"
+        rospy.loginfo("finished init")
+
+        self.blacklist = []
         
     def dyn_cfg_callback(self, config, level):
         rospy.loginfo("Reconfigure Request: k1:{k1}, k2:{k2}, k3:{k3}".format(**config))
@@ -120,6 +122,8 @@ class Navigator:
         """
         loads in goal if different from current goal, and replans
         """
+        if (data.x, data.y, data.theta) in self.blacklist:
+            pass
         if data.x != self.x_g or data.y != self.y_g or data.theta != self.theta_g:
             self.x_g = data.x
             self.y_g = data.y
@@ -194,6 +198,10 @@ class Navigator:
     def switch_mode(self, new_mode):
         rospy.loginfo("Switching from %s -> %s", self.mode, new_mode)
         self.mode = new_mode
+        if self.mode == Mode.IDLE:
+            self.x_g = self.x
+            self.y_g = self.y
+            self.theta_g = self.theta
 
     def publish_planned_path(self, path, publisher):
         # publish planned plan for visualization
@@ -276,13 +284,8 @@ class Navigator:
         success = problem.solve()
         if not success:
             rospy.loginfo("Planning failed")
-            # If this is a new command, simply return to IDLE
-            # if self.current_plan_duration == np.inf:
-            #     self.switch_mode(Mode.IDLE)
-            #     # forget about goal
-            #     self.x_g = None
-            #     self.y_g = None
-            #     self.theta_g = None
+            self.switch_mode(Mode.IDLE)
+            self.blacklist.append((self.x_g, self.y_g, self.theta_g))
             return
         rospy.loginfo("Planning Succeeded")
 
@@ -292,7 +295,7 @@ class Navigator:
         # Check whether path is too short
         if len(planned_path) < 4:
             rospy.loginfo("Path too short to track")
-            self.switch_mode(Mode.PARK)
+            self.switch_mode(Mode.IDLE)
             return
 
         # Smooth and generate a trajectory
@@ -348,7 +351,7 @@ class Navigator:
                 self.current_plan = []
                 rospy.loginfo("Navigator: waiting for state info")
                 self.switch_mode(Mode.IDLE)
-                print e
+                rospy.loginfo(str(e))
                 pass
 
             # STATE MACHINE LOGIC

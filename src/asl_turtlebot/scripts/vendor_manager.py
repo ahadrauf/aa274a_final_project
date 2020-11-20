@@ -46,6 +46,7 @@ from visualization_msgs.msg import Marker
 from std_msgs.msg import String
 from asl_turtlebot.msg import DetectedObjectList, DetectedObject
 
+
 # TASK PARAMS
 TOTAL_VENDORS = 5
 AVERAGING_SIZE = 30
@@ -57,7 +58,7 @@ WAYPOINT_CMD_TOPIC = '/cmd_nav'
 DELIVERY_REQUEST_TOPIC = '/delivery_request'
 VENDOR_DETECTED_TOPIC = '/detector/objects'
 CMD_NAV_EXEC_TOPIC = '/cmd_nav_exec'
-MARKER_TOPIC = '/marker_topic'
+MARKER_TOPIC = '/visualization_marker'
 
 # PARAMS
 NAV_STATUS_PARAM = '/nav/status'
@@ -226,7 +227,7 @@ class VendorManager:
                     self.vendor_pos_buffer[obj_msg.name].push(np.array((vendor_x, vendor_y, th)))
 
                 # Debug
-                if obj_msg.name == "apple":
+                if obj_msg.name == "stop_sign":
                     self.update_marker(self.vendor_pos_buffer[obj_msg.name].average)
 
         if DUPLICATE_VENDOR_NAMES_EXIST:
@@ -260,7 +261,6 @@ class VendorManager:
                 if obj_msg.name in self.vendor_pos_buffer:
                     existing_vendor = False
                     for idx, existing_vendor_pos in enumerate(self.vendor_pos[obj_msg.name]):
-                        print(detected_vendor_pos, existing_vendor_pos, np.linalg.norm(detected_vendor_pos - existing_vendor_pos))
                         if np.linalg.norm(detected_vendor_pos - existing_vendor_pos) < SAME_VENDOR_THRESHOLD:
                             # Push newest value received (ONLY if delta theta is within specific range
                             if abs(d_theta) < OBJ_THETA_THRESHOLD:
@@ -274,16 +274,17 @@ class VendorManager:
                             self.vendor_pos_buffer[obj_msg.name][-1].push(detected_vendor_pos)
 
                 # Debug
-                if obj_msg.name == "apple":
+                if obj_msg.name == "stop_sign":
                     self.update_marker(self.vendor_pos_buffer[obj_msg.name][0].average)
 
         # print('Vendor Pos Dict', self.final_vendor_pos)
         # print('Buffer', self.vendor_pos_buffer[obj_msg.name])
         # print('Vendor Pos', self.vendor_pos[obj_msg.name])
-
+        print("Detected Vendors:", self.final_vendor_pos)
 
         # Debug
          #rospy.loginfo("{} pos: {}".format(obj_msg.name, self.vendor_pos_buffer[obj_msg.name].average))
+
 
     def delivery_request_callback(self, data):
         """
@@ -301,7 +302,7 @@ class VendorManager:
         """
         self.sis.stop()
 
-    def update_marker(self, pos):
+    def update_marker(self, pos, r=1.0, g=0.0, b=0.0):
         """
         Publishes updated marker message for debugging.
 
@@ -329,9 +330,9 @@ class VendorManager:
         marker.scale.z = 0.1
 
         marker.color.a = 1.0
-        marker.color.r = 1.0
-        marker.color.g = 0.0
-        marker.color.b = 0.0
+        marker.color.r = r
+        marker.color.g = g
+        marker.color.b = b
 
         self.marker_pub.publish(marker)
 

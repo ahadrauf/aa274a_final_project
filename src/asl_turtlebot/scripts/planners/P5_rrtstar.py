@@ -4,116 +4,63 @@ import matplotlib.patches as patches
 # from utils import plot_line_segments
 
 
-class GeometricRRT(object):
-    """Represents a motion planning problem to be solved using RRT"""
 
+class RRT(object):
+    """ Represents a motion planning problem to be solved using the RRT algorithm"""
     def __init__(self, statespace_lo, statespace_hi, x_init, x_goal, occupancy, resolution=1):
-        self.statespace_lo = statespace_lo         # state space lower bound (e.g., [-5, -5])
-        self.statespace_hi = statespace_hi         # state space upper bound (e.g., [5, 5])
-        self.occupancy = occupancy                 # occupancy grid
-        self.resolution = resolution               # resolution of the discretization of state space (cell/m)
-        self.x_init = self.snap_to_grid(x_init)    # initial state
-        self.x_goal = self.snap_to_grid(x_goal)    # goal state
-
-        self.closed_set = set()    # the set containing the states that have been visited
-        self.open_set = set()      # the set containing the states that are condidate for future expension
-
+        self.statespace_lo = np.array(statespace_lo)    # state space lower bound (e.g., [-5, -5])
+        self.statespace_hi = np.array(statespace_hi)    # state space upper bound (e.g., [5, 5])
+        self.x_init = np.array(x_init)                  # initial state
+        self.x_goal = np.array(x_goal)                  # goal state
+        self.occupancy = occupancy                      # obstacle set (line segments)
+        self.resolution = resolution
         self.path = None        # the final path as a list of states
 
-    def is_free(self, x):
+    def is_free_motion(self, x1, x2):
         """
-        Checks if a give state is free, meaning it is inside the bounds of the map and
-        is not inside any obstacle.
+        Subject to the robot dynamics, returns whether a point robot moving
+        along the shortest path from x1 to x2 would collide with any obstacles
+        (implemented as a "black box")
+
         Inputs:
-            x: state tuple
+            obstacles: list/np.array of line segments ("walls")
+            x1: start state of motion
+            x2: end state of motion
         Output:
             Boolean True/False
-        Hint: look at the usage for the DetOccupancyGrid2D.is_free() method
         """
-        ########## Code starts here ##########
-        # Check to make sure the point is within the bounds of the map
-        for idx, val in enumerate(x):
-            if val < self.statespace_lo[idx] or val > self.statespace_hi[idx]:
-                return False
-        return self.occupancy.is_free(x)
-        ########## Code ends here ##########
+        raise NotImplementedError("is_free_motion must be overriden by a subclass of RRT")
+        
+    def find_nearest(self, V, x):
+        """
+        Given a list of states V and a query state x, returns the index (row)
+        of V such that the steering distance (subject to robot dynamics) from
+        V[i] to x is minimized
 
-    def distance(self, x1, x2):
-        """
-        Computes the Euclidean distance between two states.
         Inputs:
-            x1: First state tuple
-            x2: Second state tuple
+            V: list/np.array of states ("samples")
+            x - query state
         Output:
-            Float Euclidean distance
-
-        HINT: This should take one line.
+            Integer index of nearest point in V to x
         """
-        ########## Code starts here ##########
-        return np.linalg.norm(np.array(x1) - np.array(x2))
-        ########## Code ends here ##########
+        raise NotImplementedError("find_nearest must be overriden by a subclass of RRT")
 
-    def snap_to_grid(self, x):
-        """ Returns the closest point on a discrete state grid
-        Input:
-            x: tuple state
+    def steer_towards(self, x1, x2, eps):
+        """
+        Steers from x1 towards x2 along the shortest path (subject to robot
+        dynamics). Returns x2 if the length of this shortest path is less than
+        eps, otherwise returns the point at distance eps along the path from
+        x1 to x2.
+
+        Inputs:
+            x1: start state
+            x2: target state
+            eps: maximum steering distance
         Output:
-            A tuple that represents the closest point to x on the discrete state grid
+            State (numpy vector) resulting from bounded steering
         """
-        return (self.resolution*round(x[0]/self.resolution), self.resolution*round(x[1]/self.resolution))
-
-    def get_neighbors(self, x):
-        """
-        Gets the FREE neighbor states of a given state. Assumes a motion model
-        where we can move up, down, left, right, or along the diagonals by an
-        amount equal to self.resolution.
-        Input:
-            x: tuple state
-        Ouput:
-            List of neighbors that are free, as a list of TUPLES
-
-        HINTS: Use self.is_free to check whether a given state is indeed free.
-               Use self.snap_to_grid (see above) to ensure that the neighbors
-               you compute are actually on the discrete grid, i.e., if you were
-               to compute neighbors by simply adding/subtracting self.resolution
-               from x, numerical error could creep in over the course of many
-               additions and cause grid point equality checks to fail. To remedy
-               this, you should make sure that every neighbor is snapped to the
-               grid as it is computed.
-        """
-        neighbors = []
-        ########## Code starts here ##########
-        # Start at angle = 0 and go counter clockwise (right hand rule)
-        dxs = np.array([1, 1, 0, -1, -1, -1, 0, 1]) * self.resolution
-        dys = np.array([0, 1, 1, 1, 0, -1, -1, -1]) * self.resolution
-        for dx, dy in zip(dxs, dys):
-            neighbor = (self.snap_to_grid(x + np.array([dx, dy])))
-            if self.is_free(neighbor):
-                neighbors.append(neighbor)
-        ########## Code ends here ##########
-        return neighbors
-
-    def find_best_est_cost_through(self):
-        """
-        Gets the state in open_set that has the lowest est_cost_through
-        Output: A tuple, the state found in open_set that has the lowest est_cost_through
-        """
-        return min(self.open_set, key=lambda x: self.est_cost_through[x])
-
-    def reconstruct_path(self):
-        """
-        Use the came_from map to reconstruct a path from the initial location to
-        the goal location
-        Output:
-            A list of tuples, which is a list of the states that go from start to goal
-        """
-        path = [self.x_goal]
-        current = path[-1]
-        while current != self.x_init:
-            path.append(self.came_from[current])
-            current = path[-1]
-        return list(reversed(path))
-
+        raise NotImplementedError("steer_towards must be overriden by a subclass of RRT")
+        
     def generate_path(self, V, P, n):
         """
         A custom function I wrote for generating the path trajectory given V and P
@@ -125,8 +72,9 @@ class GeometricRRT(object):
             path.append(V[current_idx, :])
             current_idx = P[current_idx]
         return np.flip(np.reshape(path, (len(path), -1)), axis=0)
+        
 
-    def solve(self, eps, max_iters=1000, goal_bias=0.05, shortcut=False):
+    def solve(self, eps=0.12, max_iters=1000, goal_bias=0.05, shortcut=False):
         """
         Constructs an RRT rooted at self.x_init with the aim of producing a
         dynamically-feasible and obstacle-free trajectory from self.x_init
@@ -184,7 +132,7 @@ class GeometricRRT(object):
             x_near = V[x_near_idx,:]
             x_new = self.steer_towards(x_near, x_rand, eps)
             
-            if self.is_free_motion(self.obstacles, x_near, x_new):
+            if self.is_free_motion(x_near, x_new):
                 V[n,:] = x_new
                 P[n] = x_near_idx
                 if np.all(x_new == self.x_goal):
@@ -198,20 +146,28 @@ class GeometricRRT(object):
         # plt.figure()
         # self.plot_problem()
         # self.plot_tree(V, P, color="blue", linewidth=.5, label="RRT tree", alpha=0.5)
-        if success:
-            # if shortcut:
-            #     self.plot_path(color="purple", linewidth=2, label="Original solution path")
-            #     self.shortcut_path()
-            #     self.plot_path(color="green", linewidth=2, label="Shortcut solution path")
+            # if success:
+            #     if shortcut:
+            #         self.plot_path(color="purple", linewidth=2, label="Original solution path")
+            #         self.shortcut_path()
+            #         self.plot_path(color="green", linewidth=2, label="Shortcut solution path")
+            #     else:
+            #         self.plot_path(color="green", linewidth=2, label="Solution path")
+            #     plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.03), fancybox=True, ncol=3)
+            #     plt.scatter(V[:n,0], V[:n,1])
             # else:
-            #     self.plot_path(color="green", linewidth=2, label="Solution path")
-            # plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.03), fancybox=True, ncol=3)
-            # plt.scatter(V[:n,0], V[:n,1])
-            print("Solution found!")
-        else:
-            print("Solution not found!")
+            #     print "Solution not found!"
+        print("Solution", success, self.path)
 
         return success
+
+    def plot_problem(self):
+        plot_line_segments(self.obstacles, color="red", linewidth=2, label="obstacles")
+        plt.scatter([self.x_init[0], self.x_goal[0]], [self.x_init[1], self.x_goal[1]], color="green", s=30, zorder=10)
+        plt.annotate(r"$x_{init}$", self.x_init[:2] + [.2, 0], fontsize=16)
+        plt.annotate(r"$x_{goal}$", self.x_goal[:2] + [.2, 0], fontsize=16)
+        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.03), fancybox=True, ncol=3)
+        plt.axis('scaled')
 
     def shortcut_path(self):
         """
@@ -228,12 +184,91 @@ class GeometricRRT(object):
             success = True
             idx = 1
             while idx < len(self.path) - 1:                    
-                if self.is_free_motion(self.obstacles, self.path[idx-1,:], self.path[idx+1,:]):
+                if self.is_free_motion(self.path[idx-1,:], self.path[idx+1,:]):
                     self.path = np.delete(self.path, idx, 0)
                     success = False
                 else:
                     idx += 1
         ########## Code ends here ##########
+
+class AStar(RRT):
+    """
+    Represents a geometric planning problem, where the steering solution
+    between two points is a straight line (Euclidean metric)
+    """
+
+    def find_nearest(self, V, x):
+        ########## Code starts here ##########
+        # Hint: This should take one line.
+        return min(range(len(V)), key=lambda idx: np.linalg.norm(V[idx,:] - x))
+        ########## Code ends here ##########
+
+    def steer_towards(self, x1, x2, eps):
+        ########## Code starts here ##########
+        # Hint: This should take one line.
+        if np.linalg.norm(x1 - x2) < eps:
+            return x2
+        else:
+            return x1 + (x2 - x1)*eps/np.linalg.norm(x1 - x2)
+        ########## Code ends here ##########
+
+    def is_free(self, x):
+        """
+        Checks if a give state is free, meaning it is inside the bounds of the map and
+        is not inside any obstacle.
+        Inputs:
+            x: state tuple
+        Output:
+            Boolean True/False
+        Hint: look at the usage for the DetOccupancyGrid2D.is_free() method
+        """
+        ########## Code starts here ##########
+        # Check to make sure the point is within the bounds of the map
+        for idx, val in enumerate(x):
+            if val < self.statespace_lo[idx] or val > self.statespace_hi[idx]:
+                return False
+        return self.occupancy.is_free(x)
+        ########## Code ends here ##########
+
+    def is_free_motion(self, x1, x2):
+        for pt in np.linspace(x1, x2):
+            if not self.is_free(self.snap_to_grid(pt)):
+                return False
+        return True
+
+    def snap_to_grid(self, x):
+        """ Returns the closest point on a discrete state grid
+        Input:
+            x: tuple state
+        Output:
+            A tuple that represents the closest point to x on the discrete state grid
+        """
+        return np.array([self.resolution*round(x[0]/self.resolution), self.resolution*round(x[1]/self.resolution)])
+
+    def is_free(self, x):
+        """
+        Checks if a give state is free, meaning it is inside the bounds of the map and
+        is not inside any obstacle.
+        Inputs:
+            x: state tuple
+        Output:
+            Boolean True/False
+        Hint: look at the usage for the DetOccupancyGrid2D.is_free() method
+        """
+        ########## Code starts here ##########
+        # Check to make sure the point is within the bounds of the map
+        for idx, val in enumerate(x):
+            if val < self.statespace_lo[idx] or val > self.statespace_hi[idx]:
+                return False
+        return self.occupancy.is_free(x)
+        ########## Code ends here ##########
+
+    def plot_tree(self, V, P, **kwargs):
+        plot_line_segments([(V[P[i],:], V[i,:]) for i in range(V.shape[0]) if P[i] >= 0], **kwargs)
+
+    def plot_path(self, **kwargs):
+        path = np.array(self.path)
+        plt.plot(path[:,0], path[:,1], **kwargs)
 
 class DetOccupancyGrid2D(object):
     """

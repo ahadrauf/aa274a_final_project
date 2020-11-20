@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from utils import plot_line_segments
+# from utils import plot_line_segments
 
 
 class AStar(object):
@@ -170,7 +170,7 @@ class AStar(object):
         while len(self.open_set) > 0:
             print("astar length: ", len(self.open_set))
             # If length of open set is > 150, we return Failure
-            if len(self.open_set) > 150:
+            if len(self.open_set) > 60:
                 return False
             # We will process our "most promising" state in our open set, i.e.: greedily selecting the one with the
             # lowest estimated cost-through
