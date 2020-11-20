@@ -36,22 +36,28 @@ import smach
 from smach import Sequence
 import smach_ros
 
+import tf
+
 import numpy as np
 
 from collections import deque
 from geometry_msgs.msg import Twist, Pose2D, PoseStamped
+from visualization_msgs.msg import Marker
 from std_msgs.msg import String
 from asl_turtlebot.msg import DetectedObjectList, DetectedObject
 
 # TASK PARAMS
 TOTAL_VENDORS = 5
-AVERAGING_SIZE = 3
+AVERAGING_SIZE = 30
+DISTANCE_OFFSET = 0.2       # Offset for distsnace values when detecting objects
+OBJ_THETA_THRESHOLD = 90. * np.pi / 180.    # +/- d_theta threshold below which a detected object measurement will be considered valid
 
 # TOPICS
 WAYPOINT_CMD_TOPIC = '/cmd_nav'
 DELIVERY_REQUEST_TOPIC = '/delivery_request'
 VENDOR_DETECTED_TOPIC = '/detector/objects'
 CMD_NAV_EXEC_TOPIC = '/cmd_nav_exec'
+MARKER_TOPIC = '/marker_topic'
 
 # PARAMS
 NAV_STATUS_PARAM = '/nav/status'
@@ -141,6 +147,7 @@ class VendorManager:
         # Initialize relevant attributes
         self.vendor_pos_buffer = {}         # Used to calculate the moving average of a vendor pos
         self.delivery_list = None           # Will be added when receive vendor list
+        self.home = None                    # home (x,y,theta)
 
         # Subscribers
         rospy.Subscriber(WAYPOINT_CMD_TOPIC, Pose2D, self.cmd_nav_callback)
@@ -149,6 +156,10 @@ class VendorManager:
 
         # Publishers
         self.cmd_exec_pub = rospy.Publisher(CMD_NAV_EXEC_TOPIC, Pose2D, queue_size=10)
+        self.marker_pub = rospy.Publisher(MARKER_TOPIC, Marker, queue_size=10)
+
+        # Listeners
+        self.trans_listener = tf.TransformListener()
 
         # Create the SMACH state machine
         self.sm = Sequence(outcomes=STATE_OUTCOMES['SM'], connector_outcome='completed')
@@ -159,6 +170,10 @@ class VendorManager:
             Sequence.add('PICKUP', self.Pickup(self))
             Sequence.add('RETURN', self.Return(self))
             Sequence.add('IDLE', self.Idle(self))
+
+        # Smach visualization
+        self.sis = smach_ros.IntrospectionServer('sm_server', self.sm, '/SM_ROOT')
+        self.sis.start()
 
     def run(self):
         """
@@ -195,16 +210,25 @@ class VendorManager:
                 # Use the detected vendor information and the current state of the robot to calculate the position (x,y)
                 # of the vendor in the world frame.
                 # d_theta = wrap_to_0_to_2pi(thetaright + wrap_to_0_to_2pi(thetaright - thetaleft) / 2)
-                d_theta = (obj_msg.thetaright + ((obj_msg.thetaleft - obj_msg.thetaright) % (2 * np.pi)) * 0.5) % (2 * np.pi)
-                vendor_x = x + obj_msg.distance * np.cos(th + d_theta)
-                vendor_y = y + obj_msg.distance * np.sin(th + d_theta)
+                d_theta = (obj_msg.thetaright + ((obj_msg.thetaleft - obj_msg.thetaright) % (2 * np.pi)) * 0.5) % (
+                            2 * np.pi)
+                if d_theta > np.pi:  # Make sure d_theta is in range (-np.pi, np.pi)
+                    d_theta -= 2 * np.pi
+                vendor_x = x + max(0, (obj_msg.distance - DISTANCE_OFFSET)) * np.cos(th + d_theta)
+                vendor_y = y + max(0, (obj_msg.distance - DISTANCE_OFFSET)) * np.sin(th + d_theta)
                 #rospy.loginfo("Vendor d: {}, th_avg: {}".format(obj_msg.distance, d_theta))
 
                 # Add RingBuffer if new vendor is being detected
                 if obj_msg.name not in self.vendor_pos_buffer:
-                    self.vendor_pos_buffer[obj_msg.name] = RingBuffer(dim=2, length=30)
+                    self.vendor_pos_buffer[obj_msg.name] = RingBuffer(dim=3, length=AVERAGING_SIZE)
 
-                self.vendor_pos_buffer[obj_msg.name].push(np.array((vendor_x, vendor_y)))
+                # Push newest value received (ONLY if delta theta is within specific range
+                if abs(d_theta) < OBJ_THETA_THRESHOLD:
+                    self.vendor_pos_buffer[obj_msg.name].push(np.array((vendor_x, vendor_y, th)))
+
+                # Debug
+                if obj_msg.name == "apple":
+                    self.update_marker(self.vendor_pos_buffer[obj_msg.name].average)
 
         if DUPLICATE_VENDOR_NAMES_EXIST:
             for obj_msg in data.ob_msgs:
@@ -213,16 +237,18 @@ class VendorManager:
                 # d_theta = wrap_to_0_to_2pi(thetaright + wrap_to_0_to_2pi(thetaright - thetaleft) / 2)
                 d_theta = (obj_msg.thetaright + ((obj_msg.thetaleft - obj_msg.thetaright) % (2 * np.pi)) * 0.5) % (
                             2 * np.pi)
-                vendor_x = x + obj_msg.distance * np.cos(th + d_theta)
-                vendor_y = y + obj_msg.distance * np.sin(th + d_theta)
-                detected_vendor_pos = np.array((vendor_x, vendor_y))
+                if d_theta > np.pi:  # Make sure d_theta is in range (-np.pi, np.pi)
+                    d_theta -= 2 * np.pi
+                vendor_x = x + max(0, (obj_msg.distance - DISTANCE_OFFSET)) * np.cos(th + d_theta)
+                vendor_y = y + max(0, (obj_msg.distance - DISTANCE_OFFSET)) * np.sin(th + d_theta)
+                detected_vendor_pos = np.array((vendor_x, vendor_y, th))
                 # rospy.loginfo("Vendor d: {}, th_avg: {}".format(obj_msg.distance, d_theta))
 
                 # Add RingBuffer if new vendor is being detected
                 # print('keys', self.vendor_pos_buffer.keys())
                 if obj_msg.name not in self.vendor_pos_buffer:
                     # print('name not in buffer', obj_msg.name, detected_vendor_pos)
-                    self.vendor_pos_buffer[obj_msg.name] = [RingBuffer(dim=2, length=30)]
+                    self.vendor_pos_buffer[obj_msg.name] = [RingBuffer(dim=3, length=AVERAGING_SIZE)]
                     self.vendor_pos_buffer[obj_msg.name][0].push(detected_vendor_pos)
 
                 # If there is already an vendor with the same name detected. Then there are two possibility:
@@ -237,12 +263,20 @@ class VendorManager:
                     for idx, existing_vendor_pos in enumerate(self.vendor_pos[obj_msg.name]):
                         print(detected_vendor_pos, existing_vendor_pos, np.linalg.norm(detected_vendor_pos - existing_vendor_pos))
                         if np.linalg.norm(detected_vendor_pos - existing_vendor_pos) < SAME_VENDOR_THRESHOLD:
-                            self.vendor_pos_buffer[obj_msg.name][idx].push(detected_vendor_pos)
+                            # Push newest value received (ONLY if delta theta is within specific range
+                            if abs(d_theta) < OBJ_THETA_THRESHOLD:
+                                self.vendor_pos_buffer[obj_msg.name][idx].push(detected_vendor_pos)
                             existing_vendor = True
                             break
                     if not existing_vendor:
-                        self.vendor_pos_buffer[obj_msg.name].append(RingBuffer(dim=2, length=30))
-                        self.vendor_pos_buffer[obj_msg.name][-1].push(detected_vendor_pos)
+                        self.vendor_pos_buffer[obj_msg.name].append(RingBuffer(dim=3, length=30))
+                        # Push newest value received (ONLY if delta theta is within specific range
+                        if abs(d_theta) < OBJ_THETA_THRESHOLD:
+                            self.vendor_pos_buffer[obj_msg.name][-1].push(detected_vendor_pos)
+
+                # Debug
+                if obj_msg.name == "apple":
+                    self.update_marker(self.vendor_pos_buffer[obj_msg.name][0].average)
 
         print('Vendor Pos Dict', self.final_vendor_pos)
         # print('Buffer', self.vendor_pos_buffer[obj_msg.name])
@@ -266,7 +300,43 @@ class VendorManager:
         """
         Execute any final commands before shutting down
         """
-        pass
+        self.sis.stop()
+
+    def update_marker(self, pos):
+        """
+        Publishes updated marker message for debugging.
+
+        Args:
+            pos (2-array): (x, y) location to post the
+        """
+        marker = Marker()
+
+        marker.header.frame_id = "map"
+        marker.header.stamp = rospy.Time()
+        marker.id = 2
+        marker.type = 2  # sphere
+
+        marker.pose.position.x = pos[0]
+        marker.pose.position.y = pos[1]
+        marker.pose.position.z = 0.25
+
+        marker.pose.orientation.x = 0.0
+        marker.pose.orientation.y = 0.0
+        marker.pose.orientation.z = 0.0
+        marker.pose.orientation.w = 0.0
+
+        marker.scale.x = 0.1
+        marker.scale.y = 0.1
+        marker.scale.z = 0.1
+
+        marker.color.a = 1.0
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+
+        self.marker_pub.publish(marker)
+
+        rospy.loginfo("Published marker!")
 
     @property
     def vendor_pos(self):
@@ -307,6 +377,14 @@ class VendorManager:
         def execute(self, userdata):
             rospy.loginfo("Executing state EXPLORE")
             while self.outer.delivery_list is None:# or len(self.outer.vendor_pos.keys()) != TOTAL_VENDORS:
+                if self.outer.home is None:
+                    try:
+                        (translation, rotation) = self.outer.trans_listener.lookupTransform('/map', '/base_footprint',
+                                                                                      rospy.Time(0))
+                        self.outer.home = np.array((translation[0], translation[1], tf.transformations.euler_from_quaternion(rotation)[2]))
+                        rospy.loginfo("SET HOME LOCATION: {}".format(self.outer.home))
+                    except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+                        pass
                 rospy.sleep(1)
 
             return "completed"
@@ -323,6 +401,7 @@ class VendorManager:
             rospy.loginfo("Executing state PICKUP")
             # Plan path
             vendors = self.outer.plan_delivery(self.outer.delivery_list)
+            rospy.loginfo("Requested Vendors: {}, Detected Vendors: {}".format(vendors, list(self.outer.final_vendor_pos.keys())))
             # Execute pickup at each vendor location sequentially
             for vendor in vendors:
                 if vendor not in self.outer.final_vendor_pos:
@@ -332,7 +411,7 @@ class VendorManager:
                 # Travel to this location
                 if not DUPLICATE_VENDOR_NAMES_EXIST:
                     self.outer.navigate_to_goal(
-                        [self.outer.vendor_pos[vendor][0], self.outer.vendor_pos[vendor][1], 0])    # TODO: What to use for th value?
+                        [self.outer.vendor_pos[vendor][0], self.outer.vendor_pos[vendor][1], self.outer.vendor_pos[vendor][2]])    # TODO: What to use for th value?
 
                 if DUPLICATE_VENDOR_NAMES_EXIST:
                     if not self.outer.final_vendor_pos[vendor]:
@@ -343,7 +422,7 @@ class VendorManager:
                     # "Apple1" to pick up the apple. This is incorrect, ideally we should implement a shortest path
                     # planner to decide which apple vendor we will navigate to pick up.
                     self.outer.navigate_to_goal(
-                        [self.outer.final_vendor_pos[vendor][0][0], self.outer.vendor_pos[vendor][0][1], 0])
+                        [self.outer.final_vendor_pos[vendor][0][0], self.outer.final_vendor_pos[vendor][0][1], self.outer.final_vendor_pos[vendor][0][2]])
 
                 # Now, "receive" the order for 3 seconds
                 rospy.sleep(3)
@@ -360,10 +439,10 @@ class VendorManager:
 
         def execute(self, userdata):
             rospy.loginfo("Executing state RETURN")
-            home_pos = rospy.get_param(HOME_POS_PARAM)
-            home_goal = [home_pos[0], home_pos[1], 0]       # TODO: What to use for theta?
+            #home_pos = rospy.get_param(HOME_POS_PARAM)
+            #home_goal = [home_pos[0], home_pos[1], 0]       # TODO: What to use for theta?
             # Travel to home
-            self.outer.navigate_to_goal(home_goal)
+            self.outer.navigate_to_goal(self.outer.home)
 
             return "completed"
 

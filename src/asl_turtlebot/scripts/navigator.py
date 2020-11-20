@@ -107,7 +107,7 @@ class Navigator:
         rospy.Subscriber('/map_metadata', MapMetaData, self.map_md_callback)
         rospy.Subscriber('/cmd_nav_exec', Pose2D, self.cmd_nav_callback)
 
-        rospy.loginfo("finished init")
+        print "finished init"
         
     def dyn_cfg_callback(self, config, level):
         rospy.loginfo("Reconfigure Request: k1:{k1}, k2:{k2}, k3:{k3}".format(**config))
@@ -276,6 +276,13 @@ class Navigator:
         success = problem.solve()
         if not success:
             rospy.loginfo("Planning failed")
+            # If this is a new command, simply return to IDLE
+            # if self.current_plan_duration == np.inf:
+            #     self.switch_mode(Mode.IDLE)
+            #     # forget about goal
+            #     self.x_g = None
+            #     self.y_g = None
+            #     self.theta_g = None
             return
         rospy.loginfo("Planning Succeeded")
 
@@ -341,7 +348,7 @@ class Navigator:
                 self.current_plan = []
                 rospy.loginfo("Navigator: waiting for state info")
                 self.switch_mode(Mode.IDLE)
-                rospy.loginfo(str(e))
+                print e
                 pass
 
             # STATE MACHINE LOGIC
