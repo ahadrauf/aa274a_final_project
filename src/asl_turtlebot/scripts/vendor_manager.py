@@ -109,7 +109,6 @@ class RingBuffer(object):
             value (int or float or array): Value(s) to push into the array (taken as a single new element)
         """
         # Add value, then increment pointer
-        print(self.buf)
         self.buf[self.ptr] = np.array(value)
         self.ptr = (self.ptr + 1) % self.length
         self.size = self.size + 1 if self.size < self.length else self.length
@@ -244,7 +243,7 @@ class VendorManager:
                         self.vendor_pos_buffer[obj_msg.name].append(RingBuffer(dim=2, length=30))
                         self.vendor_pos_buffer[obj_msg.name][-1].push(detected_vendor_pos)
 
-        print('Vendor Pos Dict', self.final_vendor_pos)
+        # print('Vendor Pos Dict', self.final_vendor_pos)
         # print('Buffer', self.vendor_pos_buffer[obj_msg.name])
         # print('Vendor Pos', self.vendor_pos[obj_msg.name])
 

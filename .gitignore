@@ -1,4 +1,5 @@
 src/asl_turtlebot/tfmodels/ssd_resnet_50_fpn_coco.pb
+src/executive_smach_visualization/
 
 devel/
 logs/
