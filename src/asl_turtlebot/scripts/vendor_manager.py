@@ -59,12 +59,12 @@ HOME_POS_PARAM = '/nav/home'
 
 # EXTENSIONS
 # Flag to turn on/off the extension to consider vendors with duplicate names. E.g two apple vendors.
-DUPLICATE_VENDOR_NAMES_EXIST = False
+DUPLICATE_VENDOR_NAMES_EXIST = True
 # For any two detections, how close they are for us to consider they are detections of the same vendor.
 SAME_VENDOR_THRESHOLD = 0.1
 # The number of detections we need to confirm a vendor actually exists. Otherwise we consider these detections as
 # outliers and discard the detected vendor.
-NON_OUTLIER_SIZE = 3
+NON_OUTLIER_SIZE = 20
 
 # Define all state outcomes
 STATE_OUTCOMES = {
@@ -109,6 +109,7 @@ class RingBuffer(object):
             value (int or float or array): Value(s) to push into the array (taken as a single new element)
         """
         # Add value, then increment pointer
+        print(self.buf)
         self.buf[self.ptr] = np.array(value)
         self.ptr = (self.ptr + 1) % self.length
         self.size = self.size + 1 if self.size < self.length else self.length
@@ -128,7 +129,7 @@ class RingBuffer(object):
         Returns:
             float or np.array: Averaged value of all elements in buffer
         """
-        return np.mean(self.buf, axis=0)
+        return np.sum(self.buf, axis=0) / self.size
 
 # Define vendor manager class
 class VendorManager:
@@ -201,7 +202,7 @@ class VendorManager:
 
                 # Add RingBuffer if new vendor is being detected
                 if obj_msg.name not in self.vendor_pos_buffer:
-                    self.vendor_pos_buffer[obj_msg.name] = RingBuffer(dim=2, length=5)
+                    self.vendor_pos_buffer[obj_msg.name] = RingBuffer(dim=2, length=30)
 
                 self.vendor_pos_buffer[obj_msg.name].push(np.array((vendor_x, vendor_y)))
 
@@ -218,8 +219,10 @@ class VendorManager:
                 # rospy.loginfo("Vendor d: {}, th_avg: {}".format(obj_msg.distance, d_theta))
 
                 # Add RingBuffer if new vendor is being detected
+                # print('keys', self.vendor_pos_buffer.keys())
                 if obj_msg.name not in self.vendor_pos_buffer:
-                    self.vendor_pos_buffer[obj_msg.name] = [RingBuffer(dim=2, length=5)]
+                    # print('name not in buffer', obj_msg.name, detected_vendor_pos)
+                    self.vendor_pos_buffer[obj_msg.name] = [RingBuffer(dim=2, length=30)]
                     self.vendor_pos_buffer[obj_msg.name][0].push(detected_vendor_pos)
 
                 # If there is already an vendor with the same name detected. Then there are two possibility:
@@ -232,13 +235,19 @@ class VendorManager:
                 if obj_msg.name in self.vendor_pos_buffer:
                     existing_vendor = False
                     for idx, existing_vendor_pos in enumerate(self.vendor_pos[obj_msg.name]):
+                        print(detected_vendor_pos, existing_vendor_pos, np.linalg.norm(detected_vendor_pos - existing_vendor_pos))
                         if np.linalg.norm(detected_vendor_pos - existing_vendor_pos) < SAME_VENDOR_THRESHOLD:
                             self.vendor_pos_buffer[obj_msg.name][idx].push(detected_vendor_pos)
                             existing_vendor = True
                             break
                     if not existing_vendor:
-                        self.vendor_pos_buffer[obj_msg.name].append(RingBuffer(dim=2, length=5))
+                        self.vendor_pos_buffer[obj_msg.name].append(RingBuffer(dim=2, length=30))
                         self.vendor_pos_buffer[obj_msg.name][-1].push(detected_vendor_pos)
+
+        print('Vendor Pos Dict', self.final_vendor_pos)
+        # print('Buffer', self.vendor_pos_buffer[obj_msg.name])
+        # print('Vendor Pos', self.vendor_pos[obj_msg.name])
+
 
         # Debug
          #rospy.loginfo("{} pos: {}".format(obj_msg.name, self.vendor_pos_buffer[obj_msg.name].average))
@@ -317,7 +326,8 @@ class VendorManager:
             # Execute pickup at each vendor location sequentially
             for vendor in vendors:
                 if vendor not in self.outer.final_vendor_pos:
-                    raise Exception("sorry, the requested vendor is not found!")
+                    print("sorry, the requested vendor is not found!")
+                    return "failed"
 
                 # Travel to this location
                 if not DUPLICATE_VENDOR_NAMES_EXIST:
@@ -326,7 +336,8 @@ class VendorManager:
 
                 if DUPLICATE_VENDOR_NAMES_EXIST:
                     if not self.outer.final_vendor_pos[vendor]:
-                        raise Exception("sorry, the requested vendor is not found!")
+                        print("sorry, the requested vendor is not found!")
+                        return "failed"
                     # Always navigate to the first vendor if there are duplicates. For example, if the user requests
                     # pick up apple and we have 3 apple vendors "Apple1", "Apple2" and "Apple3". We always go to
                     # "Apple1" to pick up the apple. This is incorrect, ideally we should implement a shortest path

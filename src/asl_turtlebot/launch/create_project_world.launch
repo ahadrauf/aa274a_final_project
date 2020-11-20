@@ -3,7 +3,7 @@
   <arg name="x_pos" default="3.15"/>
   <arg name="y_pos" default="1.6"/>
   <arg name="z_pos" default="0.0"/>
-  <arg name="gui" default="true"/>
+  <arg name="gui" default="false"/>
 
   <rosparam param="sim">false</rosparam>
   <rosparam param="map">true</rosparam>
@@ -38,7 +38,7 @@
   </include>
 
   <include file="$(find asl_turtlebot)/launch/spawn_box.launch">
-    <arg name="name" value="box_cake"/>
+    <arg name="name" value="box_apple1"/>
     <arg name="x" default="2.62" />
     <arg name="y" default="0.87" />
     <arg name="z" default="0.4" />
@@ -58,7 +58,7 @@
   </include>
 
   <include file="$(find asl_turtlebot)/launch/spawn_box.launch">
-    <arg name="name" value="box_apple1"/>
+    <arg name="name" value="box_cake"/>
     <arg name="x" default="0.015" />
     <arg name="y" default="1.5" />
     <arg name="z" default="0.4" />

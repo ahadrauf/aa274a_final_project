@@ -276,11 +276,15 @@ class Detector:
                 object_msg.thetaleft = thetaleft
                 object_msg.thetaright = thetaright
                 object_msg.corners = [ymin,xmin,ymax,xmax]
-                self.object_publishers[cl].publish(object_msg)
 
-                # add detected object to detected objects list
-                detected_objects.objects.append(self.object_labels[cl])
-                detected_objects.ob_msgs.append(object_msg)
+                height = abs(ymax - ymin)
+                width = abs(xmax - xmin)
+                if (height/width) < 2 and (height/width) > 0.5:
+                    self.object_publishers[cl].publish(object_msg)
+
+                    # add detected object to detected objects list
+                    detected_objects.objects.append(self.object_labels[cl])
+                    detected_objects.ob_msgs.append(object_msg)
 
             detected_objects.robot_pose = robot_pose
             self.detected_objects_pub.publish(detected_objects)
